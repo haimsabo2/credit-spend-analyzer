@@ -1,0 +1,26 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+
+# Local DB / data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Node
+node_modules/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
