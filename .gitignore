@@ -1,9 +1,10 @@
-﻿# Python
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .env
+.env.local
 .venv/
 
 # Local DB / data

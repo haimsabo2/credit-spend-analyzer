@@ -1,0 +1,211 @@
+// ---------------------------------------------------------------------------
+// Uploads
+// ---------------------------------------------------------------------------
+
+export interface UploadRead {
+  id: number
+  created_at: string
+  month: string
+  original_filename: string
+  size_bytes: number
+  file_hash: string
+  num_transactions: number
+}
+
+export interface UploadCreateResponse {
+  upload_id: number
+  month: string
+  file_name: string
+  file_hash: string
+  cards_detected: string[]
+  sections_detected: string[]
+  inserted_count: number
+  skipped_duplicates_count: number
+  skipped_noise_count: number
+}
+
+// ---------------------------------------------------------------------------
+// Transactions
+// ---------------------------------------------------------------------------
+
+export interface TransactionRead {
+  id: number
+  upload_id: number
+  card_label: string | null
+  section: string | null
+  posted_at: string | null
+  description: string
+  amount: number
+  currency: string | null
+  needs_review: boolean
+  category_id: number | null
+  confidence: number
+  rule_id_applied: number | null
+}
+
+export interface CategorizeRequest {
+  category_id: number
+  create_rule?: boolean
+  rule_match_type?: string | null
+  rule_pattern?: string | null
+}
+
+export interface CategorizeResponse {
+  transaction_id: number
+  category_id: number
+  rule_created: boolean
+  rule_id: number | null
+  backfill_count: number
+}
+
+export interface TransactionQueryParams {
+  month?: string
+  card_label?: string
+  section?: string
+  category_id?: number
+  needs_review?: boolean
+  q?: string
+  amount_min?: number
+  amount_max?: number
+  limit?: number
+  offset?: number
+}
+
+// ---------------------------------------------------------------------------
+// Insights
+// ---------------------------------------------------------------------------
+
+export interface CategorySpend {
+  category_id: number | null
+  category_name: string
+  amount: number
+  pct: number
+}
+
+export interface CardSpend {
+  card_label: string | null
+  amount: number
+}
+
+export interface MerchantSpend {
+  merchant_key: string
+  display_name: string
+  amount: number
+  txn_count: number
+}
+
+export interface SummaryResponse {
+  total_spend: number
+  spend_by_category: CategorySpend[]
+  spend_by_card: CardSpend[]
+  top_merchants: MerchantSpend[]
+}
+
+export interface TrendsResponse {
+  months: string[]
+  total_spend_series: number[]
+  category_series: Record<string, number[]>
+}
+
+export interface AnomalyItem {
+  type: string
+  name: string
+  current: number
+  baseline: number
+  delta: number
+  pct: number
+}
+
+// ---------------------------------------------------------------------------
+// Budgets
+// ---------------------------------------------------------------------------
+
+export interface BudgetRead {
+  id: number
+  category_id: number
+  month: string
+  budget_amount: number
+}
+
+export interface BudgetUpsertRequest {
+  category_id: number
+  month: string
+  budget_amount: number
+}
+
+export interface BudgetAlertItem {
+  category_id: number
+  category_name: string
+  budget: number
+  spent: number
+  remaining: number
+  status: "ok" | "warn" | "exceeded"
+}
+
+// ---------------------------------------------------------------------------
+// Forecast
+// ---------------------------------------------------------------------------
+
+export interface RecurringMerchant {
+  merchant_key: string
+  display_name: string
+  avg_amount: number
+  months_present: number
+}
+
+export interface CategoryForecast {
+  category_id: number | null
+  category_name: string
+  amount: number
+}
+
+export interface ForecastResponse {
+  forecast_month: string
+  total_forecast: number
+  category_forecasts: CategoryForecast[]
+  recurring_merchants: RecurringMerchant[]
+}
+
+// ---------------------------------------------------------------------------
+// Categories
+// ---------------------------------------------------------------------------
+
+export interface CategoryRead {
+  id: number
+  name: string
+  description: string | null
+  is_system: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Rules
+// ---------------------------------------------------------------------------
+
+export interface RuleRead {
+  id: number
+  category_id: number
+  category_name: string
+  pattern: string
+  match_type: string
+  priority: number
+  active: boolean
+  card_label_filter: string | null
+}
+
+export interface RuleCreateRequest {
+  category_id: number
+  pattern: string
+  match_type?: string
+  priority?: number
+  active?: boolean
+  card_label_filter?: string | null
+}
+
+export interface RuleUpdateRequest {
+  category_id?: number
+  pattern?: string
+  match_type?: string
+  priority?: number
+  active?: boolean
+  card_label_filter?: string | null
+}

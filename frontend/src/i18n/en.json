@@ -1,0 +1,64 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "upload": "Upload",
+    "months": "Months",
+    "transactions": "Transactions",
+    "needsReview": "Needs Review"
+  },
+  "sidebar": {
+    "clearAllData": "Clear All Data",
+    "clearAllDataTitle": "Clear all data?",
+    "clearAllDataDescription": "This will permanently delete all uploads, transactions, budgets, and classification rules. Categories will be kept. This action cannot be undone.",
+    "cancel": "Cancel",
+    "deleteEverything": "Delete everything"
+  },
+  "common": {
+    "language": "Language",
+    "hebrew": "עברית",
+    "english": "English"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "month": "Month",
+    "totalSpend": "Total Spend",
+    "totalTransactions": "Transactions",
+    "categoriesCount": "Categories",
+    "needsReviewCount": "Needs Review",
+    "noDataTitle": "No data for this month",
+    "noDataCtaUpload": "Upload report",
+    "errorLoading": "Error loading data"
+  },
+  "charts": {
+    "byCategory": "Spending by category",
+    "byDay": "Daily spending",
+    "trend6m": "6-month trend",
+    "other": "Other"
+  },
+  "review": {
+    "title": "Needs Review",
+    "month": "Month",
+    "search": "Search by description...",
+    "filterAll": "All",
+    "filterLowConfidence": "Low confidence (<0.6)",
+    "date": "Date",
+    "description": "Description",
+    "amount": "Amount",
+    "category": "Category",
+    "confidence": "Confidence",
+    "reason": "Reason",
+    "actions": "Actions",
+    "save": "Save",
+    "createRule": "Create rule for future",
+    "chooseCategory": "Choose category...",
+    "emptyTitle": "No transactions to review this month 🎉",
+    "successToast": "Updated successfully",
+    "errorToast": "Error saving",
+    "other": "Other",
+    "newCategoryName": "New category name",
+    "addCategory": "Add",
+    "createCategoryError": "Error creating category",
+    "willUpdateSimilar": "Will also update {{count}} similar transactions",
+    "emptyValue": "—"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "nav": {
+    "dashboard": "לוח בקרה",
+    "upload": "העלאה",
+    "months": "חודשים",
+    "transactions": "עסקאות",
+    "needsReview": "נדרש בדיקה"
+  },
+  "sidebar": {
+    "clearAllData": "מחק את כל הנתונים",
+    "clearAllDataTitle": "למחוק את כל הנתונים?",
+    "clearAllDataDescription": "פעולה זו תמחק לצמיתות את כל ההעלאות, העסקאות, התקציבים וחוקי הסיווג. הקטגוריות יישמרו. לא ניתן לבטל.",
+    "cancel": "ביטול",
+    "deleteEverything": "מחק הכל"
+  },
+  "common": {
+    "language": "שפה",
+    "hebrew": "עברית",
+    "english": "English"
+  },
+  "dashboard": {
+    "title": "לוח בקרה",
+    "month": "חודש",
+    "totalSpend": "סה״כ הוצאות",
+    "totalTransactions": "מספר עסקאות",
+    "categoriesCount": "קטגוריות",
+    "needsReviewCount": "נדרש בדיקה",
+    "noDataTitle": "אין נתונים לחודש זה",
+    "noDataCtaUpload": "העלה דוח",
+    "errorLoading": "שגיאה בטעינת הנתונים"
+  },
+  "charts": {
+    "byCategory": "הוצאות לפי קטגוריה",
+    "byDay": "הוצאות יומיות",
+    "trend6m": "מגמה 6 חודשים",
+    "other": "אחר"
+  },
+  "review": {
+    "title": "נדרש בדיקה",
+    "month": "חודש",
+    "search": "חיפוש לפי תיאור...",
+    "filterAll": "הכל",
+    "filterLowConfidence": "ביטחון נמוך (<0.6)",
+    "date": "תאריך",
+    "description": "תיאור",
+    "amount": "סכום",
+    "category": "קטגוריה",
+    "confidence": "ביטחון",
+    "reason": "סיבה",
+    "actions": "פעולות",
+    "save": "שמור",
+    "createRule": "צור כלל לפעמים הבאות",
+    "chooseCategory": "בחר קטגוריה...",
+    "emptyTitle": "אין עסקאות לבדיקה בחודש הזה 🎉",
+    "successToast": "עודכן בהצלחה",
+    "errorToast": "שגיאה בשמירה",
+    "other": "אחר",
+    "newCategoryName": "שם קטגוריה חדשה",
+    "addCategory": "הוסף",
+    "createCategoryError": "שגיאה ביצירת קטגוריה",
+    "willUpdateSimilar": "יעדכן גם {{count}} עסקאות דומות",
+    "emptyValue": "—"
+  }
+}
