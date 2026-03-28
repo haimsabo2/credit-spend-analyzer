@@ -29,11 +29,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import type { SummaryResponse } from "@/api/types"
+import { ApiError } from "@/api/client"
 import { getSummary } from "@/api/insights"
 import { getTrends } from "@/api/insights"
 import { getNeedsReview } from "@/api/transactions"
 import { listTransactions } from "@/api/transactions"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
+import { priorMonth } from "@/utils/month"
+import { isBackendUnreachable } from "@/utils/api-reachability"
+
+const EMPTY_SUMMARY: SummaryResponse = {
+  total_spend: 0,
+  spend_by_category: [],
+  spend_by_card: [],
+  top_merchants: [],
+}
 
 const TOP_CATEGORIES = 8
 const CHART_COLORS = [
@@ -78,6 +89,12 @@ function aggregateByDay(
   }))
 }
 
+function formatSignedDelta(delta: number, currency: string): string {
+  if (delta === 0) return formatCurrency(0, currency)
+  const sign = delta > 0 ? "+" : "−"
+  return `${sign}${formatCurrency(Math.abs(delta), currency)}`
+}
+
 export default function DashboardPage() {
   const { t } = useTranslation()
   const months = useMemo(() => last12Months(), [])
@@ -89,6 +106,15 @@ export default function DashboardPage() {
     queryKey: ["summary", selectedMonth],
     queryFn: () => getSummary(selectedMonth),
     enabled: !!selectedMonth,
+    retry: 1,
+  })
+
+  const prevMonthKey = useMemo(() => priorMonth(selectedMonth), [selectedMonth])
+
+  const { data: prevSummary, isLoading: prevSummaryLoading } = useQuery({
+    queryKey: ["summary", prevMonthKey ?? ""],
+    queryFn: () => getSummary(prevMonthKey!),
+    enabled: !!prevMonthKey,
   })
 
   const { data: needsReview } = useQuery({
@@ -108,14 +134,17 @@ export default function DashboardPage() {
     enabled: !!selectedMonth,
   })
 
+  const unreachable = summaryError != null && isBackendUnreachable(summaryError)
+  const effectiveSummary = summary ?? (unreachable ? EMPTY_SUMMARY : undefined)
+
   const dailyData = useMemo(() => {
     if (!transactions) return []
     return aggregateByDay(transactions, selectedMonth)
   }, [transactions, selectedMonth])
 
   const pieData = useMemo(() => {
-    if (!summary?.spend_by_category) return []
-    const cats = summary.spend_by_category.filter((c) => c.amount > 0)
+    if (!effectiveSummary?.spend_by_category) return []
+    const cats = effectiveSummary.spend_by_category.filter((c) => c.amount > 0)
     const top = cats.slice(0, TOP_CATEGORIES)
     const rest = cats.slice(TOP_CATEGORIES)
     const restAmount = rest.reduce((s, c) => s + c.amount, 0)
@@ -124,7 +153,7 @@ export default function DashboardPage() {
       result.push({ name: t("charts.other"), value: restAmount })
     }
     return result
-  }, [summary, t])
+  }, [effectiveSummary, t])
 
   const trendData = useMemo(() => {
     if (!trends?.months?.length) return []
@@ -134,19 +163,48 @@ export default function DashboardPage() {
     }))
   }, [trends])
 
-  const categoriesCount = summary?.spend_by_category?.filter((c) => c.amount > 0).length ?? 0
+  const categoriesCount = effectiveSummary?.spend_by_category?.filter((c) => c.amount > 0).length ?? 0
   const totalTransactions = transactions?.length ?? 0
-  const hasData = (summary?.total_spend ?? 0) > 0 || (transactions?.length ?? 0) > 0
+  const hasData =
+    (effectiveSummary?.total_spend ?? 0) > 0 || (transactions?.length ?? 0) > 0
 
   const currency = transactions?.[0]?.currency ?? "ILS"
   const currencySymbol = currency === "ILS" ? "₪" : currency
 
-  if (summaryError) {
+  const totalSpendSubtitle = useMemo(() => {
+    if (!prevMonthKey) return undefined
+    if (prevSummaryLoading || prevSummary === undefined) return undefined
+    const cur = effectiveSummary?.total_spend ?? 0
+    const prev = prevSummary.total_spend
+    const delta = cur - prev
+    return `${t("dashboard.vsPreviousSubtitle", {
+      month: formatMonthShort(prevMonthKey),
+      amount: formatCurrency(prev, currency),
+    })} · ${t("dashboard.deltaVsPrevious", { delta: formatSignedDelta(delta, currency) })}`
+  }, [prevMonthKey, prevSummary, prevSummaryLoading, effectiveSummary, currency, t])
+
+  const summaryErrorDetail =
+    summaryError instanceof ApiError
+      ? typeof summaryError.body === "object" &&
+          summaryError.body &&
+          "detail" in summaryError.body &&
+          typeof (summaryError.body as { detail: unknown }).detail === "string"
+        ? (summaryError.body as { detail: string }).detail
+        : `${summaryError.status} ${summaryError.statusText}`
+      : summaryError instanceof Error
+        ? summaryError.message
+        : null
+
+  if (summaryError && !unreachable) {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          {t("dashboard.errorLoading")}
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-2">
+          <p className="text-destructive font-medium">{t("dashboard.errorLoading")}</p>
+          {summaryErrorDetail ? (
+            <p className="text-sm text-destructive/90 break-words">{summaryErrorDetail}</p>
+          ) : null}
+          <p className="text-sm text-muted-foreground">{t("dashboard.errorLoadingHint")}</p>
         </div>
       </div>
     )
@@ -154,6 +212,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {unreachable ? (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100"
+          role="status"
+        >
+          {t("dashboard.backendUnreachableBanner")}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
         <div className="flex items-center gap-2">
@@ -195,7 +261,8 @@ export default function DashboardPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard
                 title={t("dashboard.totalSpend")}
-                value={formatCurrency(summary?.total_spend ?? 0, currency)}
+                value={formatCurrency(effectiveSummary?.total_spend ?? 0, currency)}
+                subtitle={totalSpendSubtitle}
               />
               <StatCard title={t("dashboard.totalTransactions")} value={totalTransactions} />
               <StatCard title={t("dashboard.categoriesCount")} value={categoriesCount} />

@@ -27,12 +27,32 @@ class UploadResult:
     skipped_noise_count: int = 0
 
 
+def _delete_uploads_for_month(session: Session, month: str) -> None:
+    """Remove all uploads and their transactions for the given YYYY-MM bucket."""
+    uploads = list(session.exec(select(Upload).where(Upload.month == month)).all())
+    for u in uploads:
+        txs = list(session.exec(select(Transaction).where(Transaction.upload_id == u.id)).all())
+        for t in txs:
+            session.delete(t)
+        session.delete(u)
+    session.commit()
+
+
 def handle_upload(
     session: Session,
     file: UploadFile,
     month: str,
+    *,
+    replace_month: bool = False,
 ) -> UploadResult:
-    """Accept an uploaded .xls file and month; persist upload and transactions with dedup."""
+    """Accept an uploaded .xls file and month; persist upload and transactions with dedup.
+
+    If replace_month is True, delete every existing upload and transaction for this month
+    before ingesting (full replace for that calendar bucket).
+    """
+    if replace_month:
+        _delete_uploads_for_month(session, month)
+
     content = file.file.read()
     file_hash = hashlib.sha256(content).hexdigest()
     filename = file.filename or "report.xls"
@@ -78,7 +98,8 @@ def handle_upload(
                 {"voucher_number": n.voucher_number, "details": n.details},
                 ensure_ascii=False,
             )
-        posted_at = n.charge_date or n.purchase_date
+        # Show purchase date (when the charge was made), not billing/settlement date.
+        posted_at = n.purchase_date or n.charge_date
         tx = Transaction(
             upload_id=upload.id,
             card_label=n.card_label,

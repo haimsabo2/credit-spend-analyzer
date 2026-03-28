@@ -56,7 +56,11 @@ class TransactionBase(SQLModel):
         index=True,
         description="Section or group label from the report",
     )
-    posted_at: Optional[date] = Field(default=None, index=True)
+    posted_at: Optional[date] = Field(
+        default=None,
+        index=True,
+        description="Purchase/transaction date from the report when available; not the card billing date",
+    )
     description: str
     amount: float
     currency: Optional[str] = Field(default="USD")

@@ -27,7 +27,26 @@
     "needsReviewCount": "Needs Review",
     "noDataTitle": "No data for this month",
     "noDataCtaUpload": "Upload report",
-    "errorLoading": "Error loading data"
+    "errorLoading": "Error loading data",
+    "errorLoadingHint": "Make sure the API is running: from the backend folder run uvicorn on port 8000, then refresh. Open the app via the Vite dev URL (e.g. http://127.0.0.1:5173) so /api requests are proxied.",
+    "backendUnreachableBanner": "Could not reach the API (backend may be stopped). This is not related to file upload. Start the backend on port 8000 and use npm run dev so /api is proxied. After the API is up, refresh the page.",
+    "vsPreviousSubtitle": "vs {{month}}: {{amount}}",
+    "deltaVsPrevious": "{{delta}} vs previous month"
+  },
+  "upload": {
+    "title": "Upload report",
+    "mergeHint": "Partial mid-month exports are fine. Re-uploading the same month adds new rows; identical lines are skipped.",
+    "replaceHint": "Use “replace” only when you want this file to become the full source of truth for that month.",
+    "replaceCheckbox": "Replace all existing data for this month",
+    "confirmReplaceTitle": "Replace month data?",
+    "confirmReplaceDescription": "All uploads and transactions for {{month}} will be permanently deleted, then this file will be imported. This cannot be undone.",
+    "confirmReplaceAction": "Replace and import",
+    "selectFile": "Excel file (.xls)",
+    "submit": "Upload",
+    "uploading": "Uploading…",
+    "successToast": "{{fileName}} — {{count}} transactions imported",
+    "errorToast": "Upload failed",
+    "invalidFileType": "Please choose a .xls file"
   },
   "charts": {
     "byCategory": "Spending by category",

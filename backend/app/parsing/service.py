@@ -8,8 +8,13 @@ from typing import List
 
 import pandas as pd
 
-from backend.parser import XlsReportParser
-from backend.parser.xls_report_parser import TransactionNormalized
+try:
+    from backend.parser import XlsReportParser
+    from backend.parser.xls_report_parser import TransactionNormalized
+except ModuleNotFoundError:
+    # uvicorn from backend/: `app` is the package root, not `backend`.
+    from parser import XlsReportParser
+    from parser.xls_report_parser import TransactionNormalized
 
 
 @dataclass

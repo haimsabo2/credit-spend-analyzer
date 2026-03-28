@@ -16,6 +16,10 @@ def post_upload(
     session: SessionDep,
     file: UploadFile = File(...),
     month: str = Form(..., description="Statement month YYYY-MM"),
+    replace_month: bool = Form(
+        False,
+        description="If true, delete all existing data for this month before importing",
+    ),
 ):
     """Upload an .xls credit card report and associate it with a statement month."""
     if not month or len(month) != 7 or month[4] != "-":
@@ -30,7 +34,7 @@ def post_upload(
     if not file.filename or not file.filename.lower().endswith(".xls"):
         raise HTTPException(422, detail="File must be a .xls file")
 
-    result = handle_upload(session, file, month)
+    result = handle_upload(session, file, month, replace_month=replace_month)
     return UploadCreateResponse(
         upload_id=result.upload.id,
         month=result.upload.month,

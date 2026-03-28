@@ -27,7 +27,26 @@
     "needsReviewCount": "נדרש בדיקה",
     "noDataTitle": "אין נתונים לחודש זה",
     "noDataCtaUpload": "העלה דוח",
-    "errorLoading": "שגיאה בטעינת הנתונים"
+    "errorLoading": "שגיאה בטעינת הנתונים",
+    "errorLoadingHint": "ודאו שהשרת (backend) רץ: מתיקיית backend הריצו uvicorn על פורט 8000, ואז רעננו — הדפדפן צריך להיות על אותו כתובת כמו שרת Vite (למשל http://127.0.0.1:5173).",
+    "backendUnreachableBanner": "לא הצלחנו להתחבר לשרת ה־API (או שהוא לא רץ). זה לא קשור להעלאת קובץ — הריצו את ה־backend על פורט 8000 והשתמשו ב־npm run dev (לא preview בלי API). אחרי שהשרת רץ, רעננו את הדף.",
+    "vsPreviousSubtitle": "מול {{month}}: {{amount}}",
+    "deltaVsPrevious": "{{delta}} לעומת החודש הקודם"
+  },
+  "upload": {
+    "title": "העלאת דוח",
+    "mergeHint": "אפשר להעלות דוח חלקי באמצע החודש. העלאה חוזרת לאותו חודש מוסיפה שורות חדשות; כפילויות מדויקות יידלגו.",
+    "replaceHint": "השתמשו ב״החלף״ רק כשהקובץ הזה אמור להיות המקור המלא לחודש.",
+    "replaceCheckbox": "החלף את כל הנתונים הקיימים לחודש זה",
+    "confirmReplaceTitle": "להחליף נתוני חודש?",
+    "confirmReplaceDescription": "כל ההעלאות והעסקאות עבור {{month}} יימחקו לצמיתות, ואז הקובץ ייובא. לא ניתן לבטל.",
+    "confirmReplaceAction": "החלף וייבא",
+    "selectFile": "קובץ Excel (.xls)",
+    "submit": "העלה",
+    "uploading": "מעלה…",
+    "successToast": "{{fileName}} — {{count}} עסקאות יובאו",
+    "errorToast": "ההעלאה נכשלה",
+    "invalidFileType": "נא לבחור קובץ ‎.xls"
   },
   "charts": {
     "byCategory": "הוצאות לפי קטגוריה",

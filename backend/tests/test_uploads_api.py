@@ -90,3 +90,36 @@ def test_upload_deduplication_same_file_twice(client: TestClient, app, fixture_f
     assert second["skipped_duplicates_count"] > 0
     assert first["upload_id"] != second["upload_id"]
     assert first["file_hash"] == second["file_hash"]
+
+
+def test_replace_month_clears_then_reimports(client: TestClient, fixture_file: Path):
+    """replace_month=true removes prior March data; same file imports fresh rows again."""
+    client.delete("/api/admin/reset")
+
+    with open(fixture_file, "rb") as f:
+        content = f.read()
+
+    r1 = client.post(
+        "/api/uploads",
+        data={"month": "2026-03"},
+        files={"file": (fixture_file.name, content, "application/vnd.ms-excel")},
+    )
+    assert r1.status_code == 200
+    first_inserted = r1.json()["inserted_count"]
+    assert first_inserted > 0
+
+    r2 = client.post(
+        "/api/uploads",
+        data={"month": "2026-03"},
+        files={"file": (fixture_file.name, content, "application/vnd.ms-excel")},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["inserted_count"] == 0
+
+    r3 = client.post(
+        "/api/uploads",
+        data={"month": "2026-03", "replace_month": "true"},
+        files={"file": (fixture_file.name, content, "application/vnd.ms-excel")},
+    )
+    assert r3.status_code == 200
+    assert r3.json()["inserted_count"] == first_inserted
