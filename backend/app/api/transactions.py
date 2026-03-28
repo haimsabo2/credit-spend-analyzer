@@ -253,8 +253,11 @@ def auto_categorize_chunk(
         .limit(limit)
     )
     txns = list(session.exec(stmt).all())
+    progress_events: list[dict] = []
     if txns:
-        chunk_summary = batch_categorize_transactions(session, txns)
+        chunk_summary = batch_categorize_transactions(
+            session, txns, progress_sink=progress_events
+        )
     else:
         chunk_summary = AutoCategorizeSummary(
             processed=0,
@@ -264,10 +267,18 @@ def auto_categorize_chunk(
             failures_sample=[],
         )
     pending = pending_categorization_count(session, month)
+    last = progress_events[-1] if progress_events else None
+    stage: str | None = None
+    detail: dict | None = None
+    if last:
+        stage = str(last.get("stage", "")) or None
+        detail = {k: v for k, v in last.items() if k != "stage"} or None
     return AutoCategorizeChunkResponse(
         chunk=chunk_summary,
         pending_remaining=pending,
         done=pending == 0,
+        categorize_stage=stage,
+        categorize_stage_detail=detail,
     )
 
 

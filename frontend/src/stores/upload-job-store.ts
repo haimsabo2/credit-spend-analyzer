@@ -16,6 +16,8 @@ interface UploadJobState {
   fileSlots: FileSlot[]
   uploadPercent: number
   categorizePercent: number
+  categorizeStageId: string | null
+  categorizeStageDetail: Record<string, unknown> | null
   errorMessage: string | null
 
   beginJob: (month: string, replaceMonth: boolean, files: File[]) => boolean
@@ -39,6 +41,8 @@ export const useUploadJobStore = create<UploadJobState>()(
       fileSlots: [],
       uploadPercent: 0,
       categorizePercent: 0,
+      categorizeStageId: null,
+      categorizeStageDetail: null,
       errorMessage: null,
 
       beginJob: (month, replaceMonth, files) => {
@@ -62,6 +66,8 @@ export const useUploadJobStore = create<UploadJobState>()(
           fileSlots,
           uploadPercent: 0,
           categorizePercent: 0,
+          categorizeStageId: null,
+          categorizeStageDetail: null,
           errorMessage: null,
         })
         queueMicrotask(() => {
@@ -87,6 +93,8 @@ export const useUploadJobStore = create<UploadJobState>()(
           fileSlots: [],
           uploadPercent: 0,
           categorizePercent: 0,
+          categorizeStageId: null,
+          categorizeStageDetail: null,
           errorMessage: null,
         })
       },

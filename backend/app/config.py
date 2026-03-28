@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
     llm_base_url: Optional[str] = None
-    # Parallel OpenAI calls while categorizing (no DB access inside workers).
-    categorize_llm_workers: int = 6
+    # Representatives per LLM request (dedupe collapses identical merchant lines first).
+    categorize_llm_batch_size: int = 32
 
     class Config:
         env_prefix = "CSA_"

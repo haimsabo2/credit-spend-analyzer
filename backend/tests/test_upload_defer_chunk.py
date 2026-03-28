@@ -65,3 +65,12 @@ def test_categorize_queue_and_chunk(client: TestClient, fixture_file: Path):
     assert "pending_remaining" in chunk_body
     assert "done" in chunk_body
     assert isinstance(chunk_body["done"], bool)
+    assert "categorize_stage" in chunk_body
+    assert "categorize_stage_detail" in chunk_body
+    assert chunk_body["categorize_stage"] in (
+        None,
+        "rules_dictionary",
+        "llm_queue",
+        "llm_batch",
+        "classification_local",
+    )

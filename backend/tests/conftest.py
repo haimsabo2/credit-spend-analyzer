@@ -32,12 +32,16 @@ _MOCK_LLM_DEFAULT = LLMCategorizationResult(
 )
 
 
+def _mock_categorize_transactions_batch(transactions):
+    return {t.id: _MOCK_LLM_DEFAULT for t in transactions}
+
+
 @pytest.fixture(autouse=True)
 def _mock_llm_for_categorization():
     """Avoid real OpenAI calls during uploads and auto-categorize (tests patch override when needed)."""
     with patch(
-        "backend.app.services.batch_categorize.llm_categorize",
-        return_value=_MOCK_LLM_DEFAULT,
+        "backend.app.services.batch_categorize.categorize_transactions_batch",
+        side_effect=_mock_categorize_transactions_batch,
     ):
         yield
 

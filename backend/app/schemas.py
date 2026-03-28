@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import field_validator
 from sqlmodel import SQLModel
@@ -52,6 +52,8 @@ class AutoCategorizeChunkResponse(SQLModel):
     chunk: AutoCategorizeSummary
     pending_remaining: int
     done: bool
+    categorize_stage: Optional[str] = None
+    categorize_stage_detail: Optional[Dict[str, Any]] = None
 
 
 class TransactionRead(SQLModel):

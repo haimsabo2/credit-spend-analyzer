@@ -26,6 +26,7 @@ import { useUploadJobStore } from "@/stores/upload-job-store"
 import { formatMonthShort } from "@/utils/format"
 import { recentMonths } from "@/utils/month"
 import { inferStatementMonthFromFiles } from "@/utils/infer-month-from-filename"
+import { CategorizeStageLine } from "@/components/upload/categorize-stage-line"
 import { Loader2, X } from "lucide-react"
 
 function fileKey(f: File): string {
@@ -181,6 +182,7 @@ export default function UploadPage() {
                 <span>{categorizePercent}%</span>
               </div>
               <Progress value={categorizePercent} />
+              <CategorizeStageLine phase={phase} />
             </>
           )}
           {fileSlots.length > 0 && (

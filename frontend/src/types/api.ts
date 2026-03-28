@@ -42,6 +42,8 @@ export interface AutoCategorizeChunkResponse {
   chunk: AutoCategorizeSummary
   pending_remaining: number
   done: boolean
+  categorize_stage?: string | null
+  categorize_stage_detail?: Record<string, unknown> | null
 }
 
 // ---------------------------------------------------------------------------

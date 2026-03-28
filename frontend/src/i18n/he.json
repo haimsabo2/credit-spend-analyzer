@@ -80,6 +80,14 @@
       "uploading": "מעלה…",
       "done": "הועלה",
       "error": "נכשל"
+    },
+    "categorizeStage": {
+      "queue": "{{count}} עסקאות ממתינות לקטלוג (מעובדות בחבילות בשרת).",
+      "rules_dictionary": "חוקים ומילון מפתחות: סורקים {{rows}} שורות בחבילה הזו…",
+      "llm_queue": "מודל שפה: {{unique}} תיאורי סוחר ייחודיים מתוך {{rows}} שורות; בערך {{batchesTotal}} קריאות למודל בחבילה הזו…",
+      "llm_batch": "מודל שפה: קריאה {{batch}} מתוך {{batchesTotal}} בחבילה הזו…",
+      "classification_local": "סיווג מקומי בלבד בחבילה הזו ({{rows}} שורות); בלי קריאות AI.",
+      "unknown": "מעבד…"
     }
   },
   "charts": {

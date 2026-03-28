@@ -23,6 +23,8 @@ export interface UploadJobPatch {
   phase?: UploadJobPhase
   uploadPercent?: number
   categorizePercent?: number
+  categorizeStageId?: string | null
+  categorizeStageDetail?: Record<string, unknown> | null
   fileSlots?: FileSlot[]
   errorMessage?: string | null
 }
@@ -115,7 +117,13 @@ export async function runUploadJobPipeline(
     return
   }
 
-  onUpdate({ phase: "categorizing", uploadPercent: 100, categorizePercent: 0 })
+  onUpdate({
+    phase: "categorizing",
+    uploadPercent: 100,
+    categorizePercent: 0,
+    categorizeStageId: null,
+    categorizeStageDetail: null,
+  })
 
   try {
     const qRes = await fetch(
@@ -128,13 +136,23 @@ export async function runUploadJobPipeline(
     const initial = queue.pending_count
 
     if (initial === 0) {
-      onUpdate({ phase: "completed", categorizePercent: 100 })
+      onUpdate({
+        phase: "completed",
+        categorizePercent: 100,
+        categorizeStageId: null,
+        categorizeStageDetail: null,
+      })
       invalidateDataQueries()
       clearJobFiles(jobId)
       _pipelines.delete(jobId)
       toast.success(i18n.t("upload.jobDoneToast"))
       return
     }
+
+    onUpdate({
+      categorizeStageId: "queue",
+      categorizeStageDetail: { count: initial },
+    })
 
     let chunks = 0
     let lastPending = initial
@@ -151,10 +169,19 @@ export async function runUploadJobPipeline(
         pending_remaining: number
         done: boolean
         chunk: { processed: number }
+        categorize_stage?: string | null
+        categorize_stage_detail?: Record<string, unknown> | null
       }
       const remaining = data.pending_remaining
       const pct = Math.round(((initial - remaining) / initial) * 100)
-      onUpdate({ categorizePercent: Math.min(100, Math.max(0, pct)) })
+      const patch: UploadJobPatch = {
+        categorizePercent: Math.min(100, Math.max(0, pct)),
+      }
+      if (data.categorize_stage) {
+        patch.categorizeStageId = data.categorize_stage
+        patch.categorizeStageDetail = data.categorize_stage_detail ?? null
+      }
+      onUpdate(patch)
 
       if (data.done) {
         break
@@ -173,7 +200,12 @@ export async function runUploadJobPipeline(
       lastPending = remaining
     }
 
-    onUpdate({ phase: "completed", categorizePercent: 100 })
+    onUpdate({
+      phase: "completed",
+      categorizePercent: 100,
+      categorizeStageId: null,
+      categorizeStageDetail: null,
+    })
     invalidateDataQueries()
     toast.success(i18n.t("upload.jobDoneToast"))
   } catch (e) {

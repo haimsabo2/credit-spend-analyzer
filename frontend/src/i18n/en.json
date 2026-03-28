@@ -80,6 +80,14 @@
       "uploading": "Uploading…",
       "done": "Uploaded",
       "error": "Failed"
+    },
+    "categorizeStage": {
+      "queue": "{{count}} transactions waiting to be categorized across server batches.",
+      "rules_dictionary": "Rules and keyword dictionary: scanning {{rows}} row(s) in this batch…",
+      "llm_queue": "AI model: {{unique}} unique merchant line(s) from {{rows}} row(s); about {{batchesTotal}} model call(s) for this batch…",
+      "llm_batch": "AI model: call {{batch}} of {{batchesTotal}} for this batch…",
+      "classification_local": "Local classification only for this batch ({{rows}} row(s)); no AI calls.",
+      "unknown": "Working…"
     }
   },
   "charts": {

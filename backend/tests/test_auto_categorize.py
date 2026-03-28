@@ -77,10 +77,12 @@ def test_auto_categorize_updates_rows(client: TestClient, seeded_month: str):
 
 
 @patch(
-    "backend.app.services.batch_categorize.llm_categorize",
-    return_value=MOCK_LLM_RESULT_NEEDS_REVIEW,
+    "backend.app.services.batch_categorize.categorize_transactions_batch",
 )
-def test_needs_review_endpoint(mock_llm, client: TestClient, seeded_month: str):
+def test_needs_review_endpoint(mock_batch, client: TestClient, seeded_month: str):
+    mock_batch.side_effect = lambda txns: {
+        t.id: MOCK_LLM_RESULT_NEEDS_REVIEW for t in txns
+    }
     client.post("/api/admin/reset-categorization", params={"month": seeded_month})
     client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
 

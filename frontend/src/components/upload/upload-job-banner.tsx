@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { CategorizeStageLine } from "@/components/upload/categorize-stage-line"
 import { useUploadJobStore } from "@/stores/upload-job-store"
 import { cn } from "@/lib/utils"
 
@@ -65,6 +66,7 @@ export function UploadJobBanner() {
                     <span>{categorizePercent}%</span>
                   </div>
                   <Progress value={categorizePercent} />
+                  <CategorizeStageLine phase={phase} />
                 </>
               )}
             </div>
