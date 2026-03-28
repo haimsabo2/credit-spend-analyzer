@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { LayoutDashboard, Upload, CalendarDays, List, AlertCircle, CreditCard, Trash2, Loader2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
-import { api } from "@/lib/api-client"
+import { api, getApiErrorToastDescription } from "@/lib/api-client"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -38,10 +38,11 @@ export function Sidebar() {
     try {
       await api.del("/api/admin/reset")
       await qc.invalidateQueries()
-      toast.success("All data cleared")
+      toast.success(t("sidebar.clearSuccess"))
       setOpen(false)
-    } catch {
-      toast.error("Failed to clear data")
+    } catch (err) {
+      const desc = getApiErrorToastDescription(err)
+      toast.error(t("sidebar.clearFailed"), desc ? { description: desc } : undefined)
     } finally {
       setClearing(false)
     }

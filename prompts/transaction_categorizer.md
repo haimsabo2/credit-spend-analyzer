@@ -34,6 +34,12 @@ Most merchants/descriptions are in Hebrew, some are in English. Output category 
 18) העברות ותשלומים
 19) אחר
 
+## Spend pattern (monthly budgeting)
+Also classify how the expense behaves over time (not the merchant category):
+- **recurring**: charges that repeat every month or on a fixed cycle (rent, subscriptions, utilities, insurance, gym, phone, etc.).
+- **one_time**: unusual one-off spend, especially travel/abroad, single large purchases, or noise that should not drive monthly “normal” spend.
+- **unknown**: not enough signal; be conservative.
+
 ## Output format (JSON only)
 Return ONLY valid JSON in this schema:
 
@@ -42,6 +48,7 @@ Return ONLY valid JSON in this schema:
   "confidence": 0.0-1.0,
   "needs_review": true/false,
   "reason_he": "<short Hebrew explanation in 6-18 words>",
+  "spend_pattern": "recurring" | "one_time" | "unknown",
   "suggest_new_category": null OR {
     "name_he": "<Hebrew category name>",
     "why_needed_he": "<short Hebrew justification>"

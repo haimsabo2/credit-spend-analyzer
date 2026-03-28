@@ -12,15 +12,6 @@ from backend.app.schemas import LLMCategorizationResult
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
 
-MOCK_LLM_RESULT = LLMCategorizationResult(
-    category_name_he="סופר ומכולת",
-    confidence=0.85,
-    needs_review=False,
-    reason_he="רכישה בסופרמרקט",
-    merchant_key_guess="shupersal",
-    suggested_new_category=None,
-)
-
 MOCK_LLM_RESULT_NEEDS_REVIEW = LLMCategorizationResult(
     category_name_he="אחר",
     confidence=0.4,
@@ -42,7 +33,8 @@ def fixture_file():
 
 @pytest.fixture
 def seeded_month(client: TestClient, fixture_file: Path) -> str:
-    """Upload a fixture so transactions exist, return the month string."""
+    """Fresh DB + upload so this module does not depend on ordering with other API tests."""
+    client.delete("/api/admin/reset")
     month = "2026-04"
     with open(fixture_file, "rb") as f:
         content = f.read()
@@ -56,8 +48,7 @@ def seeded_month(client: TestClient, fixture_file: Path) -> str:
     return month
 
 
-@patch("backend.app.api.transactions.llm_categorize", return_value=MOCK_LLM_RESULT)
-def test_auto_categorize_response_schema(mock_llm, client: TestClient, seeded_month: str):
+def test_auto_categorize_response_schema(client: TestClient, seeded_month: str):
     resp = client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
     assert resp.status_code == 200
     body = resp.json()
@@ -70,26 +61,27 @@ def test_auto_categorize_response_schema(mock_llm, client: TestClient, seeded_mo
     assert body["failed"] == 0
 
 
-@patch("backend.app.api.transactions.llm_categorize", return_value=MOCK_LLM_RESULT)
-def test_auto_categorize_updates_rows(mock_llm, client: TestClient, seeded_month: str):
-    resp = client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
-    assert resp.status_code == 200
-    body = resp.json()
-
-    if body["processed"] == 0:
-        pytest.skip("No uncategorized transactions to test")
-
-    assert body["categorized"] + body["needs_review"] + body["failed"] == body["processed"]
-
-    txns = client.get("/api/transactions", params={"month": seeded_month, "limit": 10}).json()
+def test_auto_categorize_updates_rows(client: TestClient, seeded_month: str):
+    """Upload already runs categorization; rows should have categories, and auto-categorize is consistent."""
+    txns = client.get("/api/transactions", params={"month": seeded_month, "limit": 50}).json()
     categorized_txns = [t for t in txns if t["category_id"] is not None]
     assert len(categorized_txns) > 0
     for t in categorized_txns:
         assert t["confidence"] > 0
 
+    resp = client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
+    assert resp.status_code == 200
+    body = resp.json()
+    if body["processed"] > 0:
+        assert body["categorized"] + body["needs_review"] + body["failed"] == body["processed"]
 
-@patch("backend.app.api.transactions.llm_categorize", return_value=MOCK_LLM_RESULT_NEEDS_REVIEW)
+
+@patch(
+    "backend.app.services.batch_categorize.llm_categorize",
+    return_value=MOCK_LLM_RESULT_NEEDS_REVIEW,
+)
 def test_needs_review_endpoint(mock_llm, client: TestClient, seeded_month: str):
+    client.post("/api/admin/reset-categorization", params={"month": seeded_month})
     client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
 
     resp = client.get("/api/transactions/needs-review", params={"month": seeded_month})
@@ -100,8 +92,7 @@ def test_needs_review_endpoint(mock_llm, client: TestClient, seeded_month: str):
         assert t["needs_review"] is True
 
 
-@patch("backend.app.api.transactions.llm_categorize", return_value=MOCK_LLM_RESULT)
-def test_auto_categorize_force_param(mock_llm, client: TestClient, seeded_month: str):
+def test_auto_categorize_force_param(client: TestClient, seeded_month: str):
     """force=false processes only uncategorized; force=true processes all."""
     resp_no_force = client.post(
         "/api/transactions/auto-categorize",

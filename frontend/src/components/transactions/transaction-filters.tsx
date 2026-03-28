@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import type { CategoryRead } from "@/types/api"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -17,6 +18,7 @@ export interface FilterValues {
   card_label: string
   section: string
   needs_review: string
+  spend_pattern: string
   amount_min: string
   amount_max: string
 }
@@ -27,6 +29,7 @@ export const EMPTY_FILTERS: FilterValues = {
   card_label: "",
   section: "",
   needs_review: "",
+  spend_pattern: "",
   amount_min: "",
   amount_max: "",
 }
@@ -48,6 +51,7 @@ function useDebounced(value: string, ms: number) {
 }
 
 export function TransactionFilters({ filters, onChange, categories, cardLabels }: Props) {
+  const { t } = useTranslation()
   const [localQ, setLocalQ] = useState(filters.q)
   const [localMin, setLocalMin] = useState(filters.amount_min)
   const [localMax, setLocalMax] = useState(filters.amount_max)
@@ -83,7 +87,7 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
       <div className="relative w-56">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search transactions..."
+          placeholder={t("transactionsTable.searchPlaceholder")}
           value={localQ}
           onChange={(e) => setLocalQ(e.target.value)}
           className="pl-9"
@@ -92,10 +96,10 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
 
       <Select value={filters.category_id || "all"} onValueChange={(v) => update({ category_id: v === "all" ? "" : v })}>
         <SelectTrigger className="w-40">
-          <SelectValue placeholder="Category" />
+          <SelectValue placeholder={t("transactionsTable.filterCategoryPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All categories</SelectItem>
+          <SelectItem value="all">{t("transactionsTable.allCategories")}</SelectItem>
           {categories?.map((c) => (
             <SelectItem key={c.id} value={String(c.id)}>
               {c.name}
@@ -106,10 +110,10 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
 
       <Select value={filters.card_label || "all"} onValueChange={(v) => update({ card_label: v === "all" ? "" : v })}>
         <SelectTrigger className="w-40">
-          <SelectValue placeholder="Card" />
+          <SelectValue placeholder={t("transactionsTable.filterCardPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All cards</SelectItem>
+          <SelectItem value="all">{t("transactionsTable.allCards")}</SelectItem>
           {cardLabels.map((l) => (
             <SelectItem key={l} value={l}>
               {l.length > 20 ? l.slice(0, 20) + "..." : l}
@@ -120,30 +124,45 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
 
       <Select value={filters.section || "all"} onValueChange={(v) => update({ section: v === "all" ? "" : v })}>
         <SelectTrigger className="w-28">
-          <SelectValue placeholder="Section" />
+          <SelectValue placeholder={t("transactionsTable.filterSectionPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All</SelectItem>
-          <SelectItem value="IL">IL</SelectItem>
-          <SelectItem value="FOREIGN">Foreign</SelectItem>
+          <SelectItem value="all">{t("transactionsTable.allSections")}</SelectItem>
+          <SelectItem value="IL">{t("transactionsTable.sectionIL")}</SelectItem>
+          <SelectItem value="FOREIGN">{t("transactionsTable.sectionForeign")}</SelectItem>
         </SelectContent>
       </Select>
 
       <Select value={filters.needs_review || "all"} onValueChange={(v) => update({ needs_review: v === "all" ? "" : v })}>
         <SelectTrigger className="w-32">
-          <SelectValue placeholder="Review" />
+          <SelectValue placeholder={t("transactionsTable.filterReviewPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All</SelectItem>
-          <SelectItem value="true">Needs review</SelectItem>
-          <SelectItem value="false">Categorized</SelectItem>
+          <SelectItem value="all">{t("transactionsTable.reviewAll")}</SelectItem>
+          <SelectItem value="true">{t("transactionsTable.reviewNeedsReview")}</SelectItem>
+          <SelectItem value="false">{t("transactionsTable.reviewCategorized")}</SelectItem>
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={filters.spend_pattern || "all"}
+        onValueChange={(v) => update({ spend_pattern: v === "all" ? "" : v })}
+      >
+        <SelectTrigger className="w-[9.5rem]">
+          <SelectValue placeholder={t("transactionsTable.filterPattern")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{t("transactionsTable.filterAllPatterns")}</SelectItem>
+          <SelectItem value="unknown">{t("transactionsTable.unknown")}</SelectItem>
+          <SelectItem value="recurring">{t("transactionsTable.recurring")}</SelectItem>
+          <SelectItem value="one_time">{t("transactionsTable.oneTime")}</SelectItem>
         </SelectContent>
       </Select>
 
       <div className="flex items-center gap-1.5">
         <Input
           type="number"
-          placeholder="Min"
+          placeholder={t("transactionsTable.amountMinPlaceholder")}
           value={localMin}
           onChange={(e) => setLocalMin(e.target.value)}
           className="w-20"
@@ -151,7 +170,7 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
         <span className="text-xs text-muted-foreground">–</span>
         <Input
           type="number"
-          placeholder="Max"
+          placeholder={t("transactionsTable.amountMaxPlaceholder")}
           value={localMax}
           onChange={(e) => setLocalMax(e.target.value)}
           className="w-20"
@@ -171,7 +190,7 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
           }}
         >
           <X className="h-3.5 w-3.5" />
-          Reset
+          {t("transactionsTable.resetFilters")}
         </Button>
       )}
     </div>

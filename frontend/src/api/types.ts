@@ -13,6 +13,8 @@ export interface Transaction {
   rule_id_applied: number | null
   reason_he?: string | null
   meta_json?: string | null
+  spend_pattern?: string
+  spend_pattern_user_set?: boolean
 }
 
 export interface CategorizeRequest {

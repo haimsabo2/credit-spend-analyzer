@@ -1,28 +1,56 @@
 from __future__ import annotations
 
-import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import or_
-from sqlmodel import func, select
+from sqlmodel import Session, func, select
 
 from ..dependencies import SessionDep
 from ..models import ClassificationRule, Transaction, Upload
 from ..schemas import (
+    AutoCategorizeChunkResponse,
     AutoCategorizeSummary,
+    CategorizeQueueResponse,
     CategorizeRequest,
     CategorizeResponse,
+    SpendPatternUpdate,
     TransactionRead,
 )
-from ..services.categories import get_category_id_by_name_he
-from ..services.categorizer import categorize_transaction as llm_categorize
-from ..services.classification import apply_single_rule, find_matching_rule
-from ..services.dictionary_rules import dictionary_categorize
+from ..services.batch_categorize import batch_categorize_transactions
+from ..services.spend_pattern import ALLOWED_SPEND_PATTERNS
+from ..services.classification import apply_single_rule
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _validate_month_ym(month: str) -> None:
+    if not month or len(month) != 7 or month[4] != "-":
+        raise HTTPException(422, detail="month must be YYYY-MM")
+    try:
+        y, m = int(month[:4]), int(month[5:7])
+        if not (1 <= m <= 12):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(422, detail="month must be YYYY-MM")
+
+
+def pending_categorization_count(session: Session, month: str) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(Transaction)
+        .join(Upload, Transaction.upload_id == Upload.id)
+        .where(
+            Upload.month == month,
+            or_(
+                Transaction.category_id == None,  # noqa: E711
+                Transaction.confidence < 0.6,
+            ),
+        )
+    )
+    return int(session.exec(stmt).one())
 
 
 @router.get("", response_model=list[TransactionRead])
@@ -39,10 +67,16 @@ def get_transactions(
     q: str | None = Query(None, description="Search merchant/details text"),
     amount_min: float | None = Query(None, description="Minimum amount inclusive"),
     amount_max: float | None = Query(None, description="Maximum amount inclusive"),
+    spend_pattern: str | None = Query(
+        None,
+        description="Filter by spend pattern: unknown, recurring, one_time",
+    ),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     """List transactions with optional filters, text search, and pagination."""
+    if spend_pattern is not None and spend_pattern not in ALLOWED_SPEND_PATTERNS:
+        raise HTTPException(422, detail="spend_pattern must be unknown, recurring, or one_time")
     stmt = select(Transaction).join(Upload)
 
     if month is not None:
@@ -61,6 +95,8 @@ def get_transactions(
         stmt = stmt.where(Transaction.amount >= amount_min)
     if amount_max is not None:
         stmt = stmt.where(Transaction.amount <= amount_max)
+    if spend_pattern is not None:
+        stmt = stmt.where(Transaction.spend_pattern == spend_pattern)
     if q:
         stmt = stmt.where(
             or_(
@@ -135,8 +171,22 @@ def categorize_transaction(
     )
 
 
-_MAX_FAILURE_SAMPLES = 5
-_BATCH_SIZE = 25
+@router.patch("/{transaction_id}/spend-pattern", response_model=TransactionRead)
+def update_spend_pattern(
+    transaction_id: int,
+    body: SpendPatternUpdate,
+    session: SessionDep,
+):
+    """Set recurring / one_time / unknown; marks as user override so auto-categorize won't change it."""
+    txn = session.get(Transaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, detail="Transaction not found")
+    txn.spend_pattern = body.spend_pattern
+    txn.spend_pattern_user_set = True
+    session.add(txn)
+    session.commit()
+    session.refresh(txn)
+    return TransactionRead.from_orm(txn)
 
 
 @router.post("/auto-categorize", response_model=AutoCategorizeSummary)
@@ -170,98 +220,54 @@ def auto_categorize(
             )
         )
     txns = list(session.exec(stmt).all())
+    return batch_categorize_transactions(session, txns)
 
-    processed = len(txns)
-    categorized = 0
-    needs_review_count = 0
-    failed = 0
-    failures_sample: list[str] = []
 
-    for idx, txn in enumerate(txns, 1):
-        tx_id = txn.id
-        try:
-            # --- Layer 1: DB classification rules ---
-            with session.no_autoflush:
-                rule = find_matching_rule(session, txn)
-            if rule is not None:
-                txn.category_id = rule.category_id
-                txn.confidence = 0.9
-                txn.rule_id_applied = rule.id
-                txn.needs_review = False
-                txn.reason_he = f"rule:{rule.pattern}"
-                session.add(txn)
-                categorized += 1
-                logger.info("tx %s -> rule (pattern=%s)", tx_id, rule.pattern)
-                if idx % _BATCH_SIZE == 0:
-                    session.commit()
-                continue
+@router.get("/categorize-queue", response_model=CategorizeQueueResponse)
+def categorize_queue(session: SessionDep, month: str = Query(..., description="Statement month YYYY-MM")):
+    """Count transactions in this month still needing auto-categorization (same filter as auto-categorize)."""
+    _validate_month_ym(month)
+    n = pending_categorization_count(session, month)
+    return CategorizeQueueResponse(pending_count=n)
 
-            # --- Layer 2: keyword dictionary ---
-            dict_hit = dictionary_categorize(txn)
-            if dict_hit is not None:
-                with session.no_autoflush:
-                    cat_id = get_category_id_by_name_he(
-                        session, dict_hit.category_name_he
-                    )
-                txn.category_id = cat_id
-                txn.confidence = dict_hit.confidence
-                txn.reason_he = dict_hit.reason_he
-                txn.needs_review = False
-                session.add(txn)
-                categorized += 1
-                logger.info("tx %s -> dict (%s)", tx_id, dict_hit.category_name_he)
-                if idx % _BATCH_SIZE == 0:
-                    session.commit()
-                continue
 
-            # --- Layer 3: LLM ---
-            result = llm_categorize(txn)
-
-            with session.no_autoflush:
-                cat_id = get_category_id_by_name_he(session, result.category_name_he)
-            txn.category_id = cat_id
-            txn.confidence = result.confidence
-            txn.reason_he = result.reason_he
-            txn.needs_review = result.needs_review
-
-            if result.suggested_new_category is not None:
-                txn.meta_json = json.dumps(
-                    {
-                        "suggest_new_category": {
-                            "name_he": result.suggested_new_category.name_he,
-                            "why_needed_he": result.suggested_new_category.why_needed_he,
-                        }
-                    },
-                    ensure_ascii=False,
-                )
-                txn.needs_review = True
-
-            session.add(txn)
-            logger.info("tx %s -> llm (%s)", tx_id, result.category_name_he)
-
-            if txn.needs_review:
-                needs_review_count += 1
-            else:
-                categorized += 1
-        except Exception as exc:
-            session.rollback()
-            logger.warning("Categorization failed for tx %s: %s", tx_id, exc)
-            failed += 1
-            if len(failures_sample) < _MAX_FAILURE_SAMPLES:
-                failures_sample.append(f"tx {tx_id}: {exc}")
-            continue
-
-        if idx % _BATCH_SIZE == 0:
-            session.commit()
-
-    session.commit()
-
-    return AutoCategorizeSummary(
-        processed=processed,
-        categorized=categorized,
-        needs_review=needs_review_count,
-        failed=failed,
-        failures_sample=failures_sample,
+@router.post("/auto-categorize-chunk", response_model=AutoCategorizeChunkResponse)
+def auto_categorize_chunk(
+    session: SessionDep,
+    month: str = Query(..., description="Statement month YYYY-MM"),
+    limit: int = Query(25, ge=1, le=200, description="Max transactions to process in this request"),
+):
+    """Process up to *limit* pending transactions for *month*; use for progress UI."""
+    _validate_month_ym(month)
+    stmt = (
+        select(Transaction)
+        .join(Upload)
+        .where(
+            Upload.month == month,
+            or_(
+                Transaction.category_id == None,  # noqa: E711
+                Transaction.confidence < 0.6,
+            ),
+        )
+        .order_by(Transaction.id.asc())
+        .limit(limit)
+    )
+    txns = list(session.exec(stmt).all())
+    if txns:
+        chunk_summary = batch_categorize_transactions(session, txns)
+    else:
+        chunk_summary = AutoCategorizeSummary(
+            processed=0,
+            categorized=0,
+            needs_review=0,
+            failed=0,
+            failures_sample=[],
+        )
+    pending = pending_categorization_count(session, month)
+    return AutoCategorizeChunkResponse(
+        chunk=chunk_summary,
+        pending_remaining=pending,
+        done=pending == 0,
     )
 
 

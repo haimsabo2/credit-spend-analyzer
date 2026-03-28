@@ -14,6 +14,7 @@ from openai import OpenAI
 from ..config import get_settings
 from ..models import Transaction
 from ..schemas import LLMCategorizationResult, SuggestedCategory
+from .spend_pattern import normalize_spend_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def _parse_llm_response(raw: str) -> LLMCategorizationResult:
         reason_he=data["reason_he"],
         merchant_key_guess=data.get("merchant_key_guess"),
         suggested_new_category=suggested,
+        spend_pattern=normalize_spend_pattern(data.get("spend_pattern")),
     )
 
 

@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from pydantic import field_validator
 from sqlmodel import SQLModel
 
+from .spend_pattern_constants import ALLOWED_SPEND_PATTERNS
 from .utils import normalize_currency_code
 
 
@@ -21,6 +22,14 @@ class UploadRead(SQLModel):
     model_config = {"from_attributes": True}
 
 
+class AutoCategorizeSummary(SQLModel):
+    processed: int
+    categorized: int
+    needs_review: int
+    failed: int
+    failures_sample: List[str]
+
+
 class UploadCreateResponse(SQLModel):
     upload_id: int
     month: str
@@ -31,6 +40,18 @@ class UploadCreateResponse(SQLModel):
     inserted_count: int
     skipped_duplicates_count: int
     skipped_noise_count: int
+    categorization: AutoCategorizeSummary
+    categorization_deferred: bool = False
+
+
+class CategorizeQueueResponse(SQLModel):
+    pending_count: int
+
+
+class AutoCategorizeChunkResponse(SQLModel):
+    chunk: AutoCategorizeSummary
+    pending_remaining: int
+    done: bool
 
 
 class TransactionRead(SQLModel):
@@ -48,6 +69,8 @@ class TransactionRead(SQLModel):
     rule_id_applied: Optional[int]
     reason_he: Optional[str] = None
     meta_json: Optional[str] = None
+    spend_pattern: str = "unknown"
+    spend_pattern_user_set: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -76,14 +99,6 @@ class CategorizeResponse(SQLModel):
     backfill_count: int
 
 
-class AutoCategorizeSummary(SQLModel):
-    processed: int
-    categorized: int
-    needs_review: int
-    failed: int
-    failures_sample: List[str]
-
-
 # ---------------------------------------------------------------------------
 # LLM categorization schemas
 # ---------------------------------------------------------------------------
@@ -100,6 +115,19 @@ class LLMCategorizationResult(SQLModel):
     reason_he: str
     merchant_key_guess: Optional[str] = None
     suggested_new_category: Optional[SuggestedCategory] = None
+    spend_pattern: str = "unknown"
+
+
+class SpendPatternUpdate(SQLModel):
+    spend_pattern: str
+
+    @field_validator("spend_pattern", mode="before")
+    @classmethod
+    def _valid_pattern(cls, v: str) -> str:
+        s = (v or "").strip()
+        if s not in ALLOWED_SPEND_PATTERNS:
+            raise ValueError("spend_pattern must be unknown, recurring, or one_time")
+        return s
 
 
 # ---------------------------------------------------------------------------

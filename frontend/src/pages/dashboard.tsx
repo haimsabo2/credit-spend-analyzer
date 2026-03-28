@@ -155,6 +155,8 @@ export default function DashboardPage() {
     return result
   }, [effectiveSummary, t])
 
+  const pieTotal = useMemo(() => pieData.reduce((s, x) => s + x.value, 0), [pieData])
+
   const trendData = useMemo(() => {
     if (!trends?.months?.length) return []
     return trends.months.map((m, i) => ({
@@ -271,29 +273,79 @@ export default function DashboardPage() {
           )}
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <ChartCard title={t("charts.byCategory")}>
+            <ChartCard title={t("charts.byCategory")} className="min-h-[240px] sm:min-h-[220px]">
               {summaryLoading ? (
-                <Skeleton className="h-[200px] w-full" />
+                <Skeleton className="min-h-[220px] w-full" />
               ) : pieData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={80}
-                      paddingAngle={2}
-                      dataKey="value"
-                      label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                    >
-                      {pieData.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number | undefined) => formatCurrency(v ?? 0, currency)} />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="flex flex-col items-stretch gap-5 sm:flex-row sm:items-start sm:gap-6">
+                  <div className="mx-auto h-[200px] w-[200px] shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={52}
+                          outerRadius={88}
+                          paddingAngle={2}
+                          dataKey="value"
+                          nameKey="name"
+                          label={false}
+                          labelLine={false}
+                          stroke="var(--background)"
+                          strokeWidth={2}
+                        >
+                          {pieData.map((_, i) => (
+                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length) return null
+                            const p = payload[0].payload as { name: string; value: number }
+                            const pct = pieTotal > 0 ? (p.value / pieTotal) * 100 : 0
+                            return (
+                              <div className="max-w-[min(90vw,280px)] rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md">
+                                <p className="break-words font-medium leading-snug">{p.name}</p>
+                                <p className="mt-1 tabular-nums text-muted-foreground">
+                                  {formatCurrency(p.value, currency)} ({pct.toFixed(1)}%)
+                                </p>
+                              </div>
+                            )
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <ul
+                    className="min-w-0 flex-1 space-y-2.5 text-sm"
+                    aria-label={t("charts.byCategory")}
+                  >
+                    {pieData.map((entry, i) => {
+                      const pct = pieTotal > 0 ? (entry.value / pieTotal) * 100 : 0
+                      return (
+                        <li key={`${entry.name}-${i}`} className="flex gap-2.5">
+                          <span
+                            className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                            aria-hidden
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+                              <span className="break-words font-medium leading-snug text-foreground">
+                                {entry.name}
+                              </span>
+                              <span className="shrink-0 tabular-nums text-muted-foreground sm:text-end">
+                                {formatCurrency(entry.value, currency)}
+                                <span className="ms-1 text-xs">({pct.toFixed(0)}%)</span>
+                              </span>
+                            </div>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
               ) : (
                 <p className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
                   —

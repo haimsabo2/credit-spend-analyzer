@@ -1,7 +1,10 @@
 import { useState, useRef, useCallback } from "react"
+import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import { useMonthStore, formatMonthLabel } from "@/stores/use-month-store"
+import { formatUploadTimestamp } from "@/utils/format"
+import { useUploadJobStore } from "@/stores/upload-job-store"
 import { useUploads } from "@/hooks/use-uploads"
-import { useUploadFile } from "@/hooks/use-upload-file"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,47 +18,59 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table"
-import {
-  UploadCloud,
-  FileSpreadsheet,
-  Loader2,
-  CheckCircle2,
-  Inbox,
-  X,
-} from "lucide-react"
+import { UploadCloud, FileSpreadsheet, Loader2, Inbox, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { UploadCreateResponse } from "@/types/api"
+
+function fileKey(f: File): string {
+  return `${f.name}:${f.size}`
+}
+
+function mergeXlsFiles(prev: File[], added: File[]): File[] {
+  const seen = new Set(prev.map(fileKey))
+  const out = [...prev]
+  for (const f of added) {
+    const k = fileKey(f)
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(f)
+  }
+  return out
+}
 
 export default function MonthsPage() {
+  const { t } = useTranslation()
   const month = useMonthStore((s) => s.month)
   const setMonth = useMonthStore((s) => s.setMonth)
   const uploads = useUploads()
-  const uploadFile = useUploadFile()
+  const beginJob = useUploadJobStore((s) => s.beginJob)
+  const phase = useUploadJobStore((s) => s.phase)
+  const jobRunning = phase === "uploading" || phase === "categorizing"
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [uploadMonth, setUploadMonth] = useState(month)
   const [dragOver, setDragOver] = useState(false)
-  const [lastResult, setLastResult] = useState<UploadCreateResponse | null>(null)
 
-  const handleFile = useCallback((file: File) => {
-    if (!file.name.toLowerCase().endsWith(".xls")) {
-      return
+  const addXlsFiles = useCallback((list: FileList | File[]) => {
+    const valid: File[] = []
+    for (const f of Array.from(list)) {
+      if (f.name.toLowerCase().endsWith(".xls")) valid.push(f)
     }
-    setSelectedFile(file)
-    setLastResult(null)
+    if (valid.length) {
+      setSelectedFiles((prev) => mergeXlsFiles(prev, valid))
+    }
   }, [])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file) handleFile(file)
+    if (jobRunning) return
+    if (e.dataTransfer.files?.length) addXlsFiles(e.dataTransfer.files)
   }
 
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault()
-    setDragOver(true)
+    if (!jobRunning) setDragOver(true)
   }
 
   function handleDragLeave(e: React.DragEvent) {
@@ -64,31 +79,32 @@ export default function MonthsPage() {
   }
 
   function handleBrowse() {
+    if (jobRunning) return
     fileInputRef.current?.click()
   }
 
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (file) handleFile(file)
+    const list = e.target.files
+    if (list?.length) addXlsFiles(list)
     e.target.value = ""
   }
 
   function handleUpload() {
-    if (!selectedFile) return
-    uploadFile.mutate(
-      { file: selectedFile, month: uploadMonth },
-      {
-        onSuccess(data) {
-          setLastResult(data)
-          setSelectedFile(null)
-        },
-      },
-    )
+    if (selectedFiles.length === 0 || jobRunning) return
+    const ok = beginJob(uploadMonth, false, selectedFiles)
+    if (!ok) {
+      toast.error(t("upload.jobAlreadyRunning"))
+      return
+    }
+    setSelectedFiles([])
   }
 
   function handleClear() {
-    setSelectedFile(null)
-    setLastResult(null)
+    setSelectedFiles([])
+  }
+
+  function removeSelectedFile(f: File) {
+    setSelectedFiles((prev) => prev.filter((x) => fileKey(x) !== fileKey(f)))
   }
 
   function handleRowClick(rowMonth: string) {
@@ -100,11 +116,10 @@ export default function MonthsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Months</h1>
         <p className="text-sm text-muted-foreground">
-          Upload credit card statements and browse past uploads
+          {t("upload.monthsIntro")}
         </p>
       </div>
 
-      {/* Upload zone */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -120,6 +135,7 @@ export default function MonthsPage() {
             onClick={handleBrowse}
             className={cn(
               "flex cursor-pointer flex-col items-center gap-3 rounded-lg border-2 border-dashed px-6 py-10 text-center transition-colors",
+              jobRunning && "pointer-events-none opacity-50",
               dragOver
                 ? "border-primary bg-primary/5"
                 : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50",
@@ -129,16 +145,42 @@ export default function MonthsPage() {
               ref={fileInputRef}
               type="file"
               accept=".xls"
+              multiple
+              disabled={jobRunning}
               className="hidden"
               onChange={handleInputChange}
             />
-            {selectedFile ? (
+            {selectedFiles.length > 0 ? (
               <>
                 <FileSpreadsheet className="h-10 w-10 text-emerald-600" />
-                <div>
-                  <p className="font-medium">{selectedFile.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {(selectedFile.size / 1024).toFixed(0)} KB &middot; Click to change
+                <div className="w-full max-w-md space-y-1 text-start">
+                  <p className="text-center font-medium">
+                    {selectedFiles.length === 1
+                      ? t("monthsPage.filesSelectedSingle")
+                      : t("monthsPage.filesSelectedMulti", { count: selectedFiles.length })}
+                  </p>
+                  <ul className="max-h-28 space-y-1 overflow-y-auto text-xs text-muted-foreground">
+                    {selectedFiles.map((f) => (
+                      <li key={fileKey(f)} className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate">{f.name}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0"
+                          disabled={jobRunning}
+                          onClick={(ev) => {
+                            ev.stopPropagation()
+                            removeSelectedFile(f)
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-center text-xs text-muted-foreground">
+                    {t("monthsPage.clickToAddOrChange")}
                   </p>
                 </div>
               </>
@@ -146,41 +188,34 @@ export default function MonthsPage() {
               <>
                 <UploadCloud className="h-10 w-10 text-muted-foreground" />
                 <div>
-                  <p className="font-medium">
-                    Drop your .xls statement here or click to browse
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Only .xls files are supported
-                  </p>
+                  <p className="font-medium">Drop .xls file(s) here or click to browse</p>
+                  <p className="text-xs text-muted-foreground">Multiple files supported — progress in the bar above</p>
                 </div>
               </>
             )}
           </div>
 
-          {selectedFile && (
+          {selectedFiles.length > 0 && (
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">Statement Month</label>
+                <label className="text-sm font-medium">{t("monthsPage.monthLabel")}</label>
                 <Input
                   type="month"
                   value={uploadMonth}
+                  disabled={jobRunning}
                   onChange={(e) => setUploadMonth(e.target.value)}
                   className="w-44"
                 />
               </div>
-              <Button
-                className="gap-1.5"
-                onClick={handleUpload}
-                disabled={uploadFile.isPending}
-              >
-                {uploadFile.isPending ? (
+              <Button className="gap-1.5" onClick={handleUpload} disabled={jobRunning}>
+                {jobRunning ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <UploadCloud className="h-4 w-4" />
                 )}
-                Upload
+                {t("monthsPage.uploadButton")}
               </Button>
-              <Button variant="ghost" size="icon" onClick={handleClear}>
+              <Button variant="ghost" size="icon" onClick={handleClear} disabled={jobRunning}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -188,46 +223,6 @@ export default function MonthsPage() {
         </CardContent>
       </Card>
 
-      {/* Upload result */}
-      {lastResult && (
-        <Card className="border-emerald-200 bg-emerald-50/50">
-          <CardContent className="py-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-              <div className="space-y-2">
-                <p className="font-medium text-emerald-800">Upload successful</p>
-                <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-emerald-700">
-                  <span>
-                    <strong>{lastResult.inserted_count}</strong> transactions imported
-                  </span>
-                  {lastResult.skipped_duplicates_count > 0 && (
-                    <span>
-                      {lastResult.skipped_duplicates_count} duplicates skipped
-                    </span>
-                  )}
-                  {lastResult.skipped_noise_count > 0 && (
-                    <span>{lastResult.skipped_noise_count} noise rows skipped</span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {lastResult.cards_detected.map((c) => (
-                    <Badge key={c} variant="outline" className="bg-white text-xs">
-                      {c}
-                    </Badge>
-                  ))}
-                  {lastResult.sections_detected.map((s) => (
-                    <Badge key={s} variant="secondary" className="text-xs">
-                      {s}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Upload history */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Upload History</CardTitle>
@@ -242,7 +237,7 @@ export default function MonthsPage() {
           ) : !uploads.data || uploads.data.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
               <Inbox className="h-8 w-8" />
-              <p className="text-sm">No uploads yet. Upload your first statement above.</p>
+              <p className="text-sm">{t("monthsPage.noUploads")}</p>
             </div>
           ) : (
             <div className="rounded-md border">
@@ -275,14 +270,10 @@ export default function MonthsPage() {
                         {u.num_transactions}
                       </TableCell>
                       <TableCell className="text-right text-sm text-muted-foreground">
-                        {(u.size_bytes / 1024).toFixed(0)} KB
+                        {t("monthsPage.sizeKB", { n: (u.size_bytes / 1024).toFixed(0) })}
                       </TableCell>
                       <TableCell className="text-right text-sm text-muted-foreground">
-                        {new Date(u.created_at).toLocaleDateString("en-GB", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "numeric",
-                        })}
+                        {formatUploadTimestamp(u.created_at)}
                       </TableCell>
                     </TableRow>
                   ))}

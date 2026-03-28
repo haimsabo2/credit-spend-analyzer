@@ -12,7 +12,8 @@ from sqlmodel import Session, select
 
 from ..models import Transaction, Upload
 from ..parsing.service import parse_xls_bytes
-from .classification import apply_rules
+from ..schemas import AutoCategorizeSummary
+from .batch_categorize import batch_categorize_transactions
 
 
 @dataclass
@@ -25,6 +26,15 @@ class UploadResult:
     inserted_count: int = 0
     skipped_duplicates_count: int = 0
     skipped_noise_count: int = 0
+    categorization: AutoCategorizeSummary = field(
+        default_factory=lambda: AutoCategorizeSummary(
+            processed=0,
+            categorized=0,
+            needs_review=0,
+            failed=0,
+            failures_sample=[],
+        )
+    )
 
 
 def _delete_uploads_for_month(session: Session, month: str) -> None:
@@ -44,11 +54,15 @@ def handle_upload(
     month: str,
     *,
     replace_month: bool = False,
+    defer_categorization: bool = False,
 ) -> UploadResult:
     """Accept an uploaded .xls file and month; persist upload and transactions with dedup.
 
     If replace_month is True, delete every existing upload and transaction for this month
     before ingesting (full replace for that calendar bucket).
+
+    If defer_categorization is True, rows are inserted but rules/dictionary/LLM are not run;
+    call auto-categorize (or chunked endpoint) afterward.
     """
     if replace_month:
         _delete_uploads_for_month(session, month)
@@ -122,10 +136,26 @@ def handle_upload(
     session.commit()
     session.refresh(upload)
 
-    if inserted_txns:
+    if defer_categorization:
+        cat_summary = AutoCategorizeSummary(
+            processed=0,
+            categorized=0,
+            needs_review=0,
+            failed=0,
+            failures_sample=[],
+        )
+    elif inserted_txns:
         for tx in inserted_txns:
             session.refresh(tx)
-        apply_rules(session, inserted_txns)
+        cat_summary = batch_categorize_transactions(session, inserted_txns)
+    else:
+        cat_summary = AutoCategorizeSummary(
+            processed=0,
+            categorized=0,
+            needs_review=0,
+            failed=0,
+            failures_sample=[],
+        )
 
     return UploadResult(
         upload=upload,
@@ -134,4 +164,5 @@ def handle_upload(
         inserted_count=len(inserted_txns),
         skipped_duplicates_count=skipped_duplicates,
         skipped_noise_count=parse_result.noise_rows_skipped,
+        categorization=cat_summary,
     )

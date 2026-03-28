@@ -90,6 +90,15 @@ class TransactionBase(SQLModel):
         default=None,
         description="JSON blob for extra metadata (e.g. suggest_new_category)",
     )
+    spend_pattern: str = Field(
+        default="unknown",
+        index=True,
+        description="recurring (~monthly), one_time (spike / abroad noise), or unknown",
+    )
+    spend_pattern_user_set: bool = Field(
+        default=False,
+        description="If true, auto-categorization must not change spend_pattern",
+    )
 
 
 class Transaction(TransactionBase, table=True):

@@ -49,3 +49,19 @@ export function formatDayOfMonth(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00")
   return d.toLocaleDateString(locale(), { day: "numeric" })
 }
+
+/** Short date for transaction tables (follows current UI language). */
+export function formatTransactionTableDate(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00")
+  return d.toLocaleDateString(locale(), { day: "2-digit", month: "short" })
+}
+
+/** Upload list "uploaded at" cell. */
+export function formatUploadTimestamp(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleDateString(locale(), {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+}

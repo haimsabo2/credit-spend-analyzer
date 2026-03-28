@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import type { TransactionRead } from "@/types/api"
 import { useCategories } from "@/hooks/use-categories"
 import { useCategorize } from "@/hooks/use-categorize"
@@ -23,6 +24,7 @@ interface Props {
 }
 
 export function CategoryCell({ transaction }: Props) {
+  const { t } = useTranslation()
   const { data: categories } = useCategories()
   const categorize = useCategorize()
   const [pendingCategoryId, setPendingCategoryId] = useState<number | null>(null)
@@ -62,7 +64,7 @@ export function CategoryCell({ transaction }: Props) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span>Saving...</span>
+        <span>{t("transactionsTable.categorySaving")}</span>
       </div>
     )
   }
@@ -96,15 +98,16 @@ export function CategoryCell({ transaction }: Props) {
             htmlFor={`rule-${transaction.id}`}
             className="text-xs leading-tight text-muted-foreground"
           >
-            Create rule for <span className="font-medium text-foreground">"{transaction.description}"</span>
+            {t("transactionsTable.createRuleFor")}{" "}
+            <span className="font-medium text-foreground">"{transaction.description}"</span>
           </label>
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button size="sm" className="h-7 text-xs" onClick={handleConfirm}>
-            Apply
+            {t("common.apply")}
           </Button>
         </div>
       </PopoverContent>

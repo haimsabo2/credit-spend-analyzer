@@ -12,6 +12,14 @@ export interface UploadRead {
   num_transactions: number
 }
 
+export interface AutoCategorizeSummary {
+  processed: number
+  categorized: number
+  needs_review: number
+  failed: number
+  failures_sample: string[]
+}
+
 export interface UploadCreateResponse {
   upload_id: number
   month: string
@@ -22,6 +30,18 @@ export interface UploadCreateResponse {
   inserted_count: number
   skipped_duplicates_count: number
   skipped_noise_count: number
+  categorization: AutoCategorizeSummary
+  categorization_deferred?: boolean
+}
+
+export interface CategorizeQueueResponse {
+  pending_count: number
+}
+
+export interface AutoCategorizeChunkResponse {
+  chunk: AutoCategorizeSummary
+  pending_remaining: number
+  done: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +61,8 @@ export interface TransactionRead {
   category_id: number | null
   confidence: number
   rule_id_applied: number | null
+  spend_pattern?: string
+  spend_pattern_user_set?: boolean
 }
 
 export interface CategorizeRequest {
@@ -67,6 +89,7 @@ export interface TransactionQueryParams {
   q?: string
   amount_min?: number
   amount_max?: number
+  spend_pattern?: string
   limit?: number
   offset?: number
 }

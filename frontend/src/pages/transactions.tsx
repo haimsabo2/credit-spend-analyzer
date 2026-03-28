@@ -1,17 +1,19 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { useSearchParams } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { useMonthStore } from "@/stores/use-month-store"
 import { useTransactions } from "@/hooks/use-transactions"
 import { useCategories } from "@/hooks/use-categories"
 import { useAnomalies } from "@/hooks/use-anomalies"
 import { TransactionFilters, EMPTY_FILTERS, type FilterValues } from "@/components/transactions/transaction-filters"
 import { DataTable } from "@/components/transactions/data-table"
-import { columns } from "@/components/transactions/columns"
+import { getTransactionColumns } from "@/components/transactions/columns"
 import type { TransactionQueryParams } from "@/types/api"
 
 const PAGE_SIZE = 50
 
 export default function TransactionsPage() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const month = useMonthStore((s) => s.month)
 
@@ -46,8 +48,11 @@ export default function TransactionsPage() {
     else if (filters.needs_review === "false") p.needs_review = false
     if (filters.amount_min) p.amount_min = Number(filters.amount_min)
     if (filters.amount_max) p.amount_max = Number(filters.amount_max)
+    if (filters.spend_pattern) p.spend_pattern = filters.spend_pattern
     return p
   }, [month, filters, pageIndex])
+
+  const columns = useMemo(() => getTransactionColumns(t), [t])
 
   const txns = useTransactions(queryParams)
   const categories = useCategories()
@@ -73,7 +78,7 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("transactionsTable.title")}</h1>
 
       <TransactionFilters
         filters={filters}
@@ -81,6 +86,10 @@ export default function TransactionsPage() {
         categories={categories.data}
         cardLabels={cardLabels}
       />
+
+      <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
+        {t("transactionsTable.legend")}
+      </p>
 
       <DataTable
         columns={columns}
@@ -91,6 +100,7 @@ export default function TransactionsPage() {
         pageIndex={pageIndex}
         pageSize={PAGE_SIZE}
         onPageChange={setPageIndex}
+        emptyLabel={t("transactionsTable.noRows")}
       />
     </div>
   )

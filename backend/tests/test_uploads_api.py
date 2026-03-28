@@ -50,6 +50,11 @@ def test_post_upload_returns_rich_response(client: TestClient, fixture_file: Pat
     assert body["skipped_duplicates_count"] >= 0
     assert body["skipped_noise_count"] >= 0
 
+    assert "categorization" in body
+    cat = body["categorization"]
+    assert cat["processed"] == body["inserted_count"]
+    assert isinstance(cat["failures_sample"], list)
+
 
 def test_get_uploads_returns_list(client: TestClient, fixture_file: Path):
     response = client.get("/api/uploads")

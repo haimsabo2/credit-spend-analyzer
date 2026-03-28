@@ -7,6 +7,7 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table"
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import {
   Table,
   TableHeader,
@@ -19,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight, Inbox } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { TransactionRead } from "@/types/api"
 
 interface DataTableProps<T> {
   columns: ColumnDef<T, unknown>[]
@@ -30,6 +32,7 @@ interface DataTableProps<T> {
   pageIndex: number
   pageSize: number
   onPageChange: (page: number) => void
+  emptyLabel?: string
 }
 
 export function DataTable<T>({
@@ -42,8 +45,11 @@ export function DataTable<T>({
   pageIndex,
   pageSize,
   onPageChange,
+  emptyLabel,
 }: DataTableProps<T>) {
+  const { t } = useTranslation()
   const [sorting, setSorting] = useState<SortingState>([])
+  const resolvedEmpty = emptyLabel ?? t("transactionsTable.noRows")
 
   const table = useReactTable({
     data,
@@ -114,7 +120,7 @@ export function DataTable<T>({
                 <TableCell colSpan={columns.length} className="h-40 text-center">
                   <div className="flex flex-col items-center gap-2 text-muted-foreground">
                     <Inbox className="h-8 w-8" />
-                    <p className="text-sm">No transactions found</p>
+                    <p className="text-sm">{resolvedEmpty}</p>
                   </div>
                 </TableCell>
               </TableRow>
@@ -122,11 +128,19 @@ export function DataTable<T>({
               table.getRowModel().rows.map((row) => {
                 const desc = String(row.original[descriptionAccessor] ?? "")
                 const isAnomaly = anomalyNames?.has(desc)
+                const txn = row.original as unknown as TransactionRead
+                const pattern = txn.spend_pattern ?? "unknown"
                 return (
                   <TableRow
                     key={row.id}
                     className={cn(
-                      isAnomaly && "bg-destructive/5 border-l-2 border-l-destructive",
+                      isAnomaly && "bg-destructive/5 border-s-2 border-s-destructive",
+                      !isAnomaly &&
+                        pattern === "recurring" &&
+                        "bg-sky-500/[0.07] dark:bg-sky-500/10",
+                      !isAnomaly &&
+                        pattern === "one_time" &&
+                        "bg-violet-500/[0.08] dark:bg-violet-500/12",
                     )}
                   >
                     {row.getVisibleCells().map((cell) => (
@@ -144,9 +158,15 @@ export function DataTable<T>({
 
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Page {pageIndex + 1}
+          {t("transactionsTable.paginationPage", { page: pageIndex + 1 })}
           {data.length > 0 && (
-            <> &middot; {data.length} row{data.length !== 1 ? "s" : ""}</>
+            <>
+              {" "}
+              &middot;{" "}
+              {data.length === 1
+                ? t("transactionsTable.paginationRowsOne")
+                : t("transactionsTable.paginationRowsMany", { count: data.length })}
+            </>
           )}
         </p>
         <div className="flex items-center gap-2">
@@ -158,7 +178,7 @@ export function DataTable<T>({
             onClick={() => onPageChange(pageIndex - 1)}
           >
             <ChevronLeft className="h-3.5 w-3.5" />
-            Prev
+            {t("transactionsTable.paginationPrev")}
           </Button>
           <Button
             variant="outline"
@@ -167,7 +187,7 @@ export function DataTable<T>({
             disabled={!hasMore}
             onClick={() => onPageChange(pageIndex + 1)}
           >
-            Next
+            {t("transactionsTable.paginationNext")}
             <ChevronRight className="h-3.5 w-3.5" />
           </Button>
         </div>

@@ -17,3 +17,5 @@ i18n.use(initReactI18next).init({
 
 setDocumentDir(i18n.language)
 i18n.on("languageChanged", setDocumentDir)
+
+export default i18n

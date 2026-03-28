@@ -41,6 +41,48 @@ def test_get_transactions_returns_list(seeded_client: TestClient):
     assert isinstance(data, list)
 
 
+def test_get_transactions_includes_spend_pattern_fields(seeded_client: TestClient):
+    r = seeded_client.get("/api/transactions", params={"limit": 1})
+    assert r.status_code == 200
+    data = r.json()
+    if not data:
+        pytest.skip("No transactions")
+    t = data[0]
+    assert t.get("spend_pattern") in ("unknown", "recurring", "one_time")
+    assert "spend_pattern_user_set" in t
+
+
+def test_patch_spend_pattern(seeded_client: TestClient):
+    r = seeded_client.get("/api/transactions", params={"limit": 1})
+    assert r.status_code == 200
+    data = r.json()
+    if not data:
+        pytest.skip("No transactions")
+    tid = data[0]["id"]
+    p = seeded_client.patch(
+        f"/api/transactions/{tid}/spend-pattern",
+        json={"spend_pattern": "recurring"},
+    )
+    assert p.status_code == 200
+    body = p.json()
+    assert body["spend_pattern"] == "recurring"
+    assert body["spend_pattern_user_set"] is True
+
+
+def test_patch_spend_pattern_invalid(seeded_client: TestClient):
+    r = seeded_client.get("/api/transactions", params={"limit": 1})
+    assert r.status_code == 200
+    data = r.json()
+    if not data:
+        pytest.skip("No transactions")
+    tid = data[0]["id"]
+    bad = seeded_client.patch(
+        f"/api/transactions/{tid}/spend-pattern",
+        json={"spend_pattern": "nope"},
+    )
+    assert bad.status_code == 422
+
+
 def test_get_transactions_filter_by_month(seeded_client: TestClient):
     all_resp = seeded_client.get("/api/transactions", params={"limit": 500})
     assert all_resp.status_code == 200

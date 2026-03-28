@@ -1,3 +1,14 @@
+/** Recent calendar months as YYYY-MM, newest first (for dropdowns). */
+export function recentMonths(count: number): string[] {
+  const now = new Date()
+  const months: string[] = []
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`)
+  }
+  return months
+}
+
 /** Previous calendar month as YYYY-MM, or null if invalid. */
 export function priorMonth(month: string): string | null {
   if (!/^\d{4}-\d{2}$/.test(month)) return null

@@ -25,8 +25,4 @@ export const useMonthStore = create<MonthStore>((set) => ({
   nextMonth: () => set((s) => ({ month: shiftMonth(s.month, 1) })),
 }))
 
-export function formatMonthLabel(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  const d = new Date(y, m - 1)
-  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" })
-}
+export { formatMonthLabel } from "@/utils/format"
