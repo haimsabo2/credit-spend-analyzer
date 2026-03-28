@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useMonthStore, formatMonthLabel } from "@/stores/use-month-store"
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/table"
 import { UploadCloud, FileSpreadsheet, Loader2, Inbox, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { inferStatementMonthFromFiles } from "@/utils/infer-month-from-filename"
 
 function fileKey(f: File): string {
   return `${f.name}:${f.size}`
@@ -50,6 +51,7 @@ export default function MonthsPage() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [uploadMonth, setUploadMonth] = useState(month)
   const [dragOver, setDragOver] = useState(false)
+  const uploadMonthLockedRef = useRef(false)
 
   const addXlsFiles = useCallback((list: FileList | File[]) => {
     const valid: File[] = []
@@ -60,6 +62,22 @@ export default function MonthsPage() {
       setSelectedFiles((prev) => mergeXlsFiles(prev, valid))
     }
   }, [])
+
+  useEffect(() => {
+    if (selectedFiles.length === 0) {
+      uploadMonthLockedRef.current = false
+      return
+    }
+    if (uploadMonthLockedRef.current) return
+    const { month: inferred, conflict } = inferStatementMonthFromFiles(selectedFiles)
+    if (inferred) {
+      setUploadMonth(inferred)
+      setMonth(inferred)
+      if (conflict) {
+        toast.info(t("upload.filenameMonthConflict"))
+      }
+    }
+  }, [selectedFiles, setMonth, t])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -188,8 +206,8 @@ export default function MonthsPage() {
               <>
                 <UploadCloud className="h-10 w-10 text-muted-foreground" />
                 <div>
-                  <p className="font-medium">Drop .xls file(s) here or click to browse</p>
-                  <p className="text-xs text-muted-foreground">Multiple files supported — progress in the bar above</p>
+                  <p className="font-medium">{t("monthsPage.dropHint")}</p>
+                  <p className="text-xs text-muted-foreground">{t("monthsPage.dropSubhint")}</p>
                 </div>
               </>
             )}
@@ -203,7 +221,10 @@ export default function MonthsPage() {
                   type="month"
                   value={uploadMonth}
                   disabled={jobRunning}
-                  onChange={(e) => setUploadMonth(e.target.value)}
+                  onChange={(e) => {
+                    uploadMonthLockedRef.current = true
+                    setUploadMonth(e.target.value)
+                  }}
                   className="w-44"
                 />
               </div>

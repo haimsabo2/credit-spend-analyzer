@@ -235,7 +235,7 @@ def categorize_queue(session: SessionDep, month: str = Query(..., description="S
 def auto_categorize_chunk(
     session: SessionDep,
     month: str = Query(..., description="Statement month YYYY-MM"),
-    limit: int = Query(25, ge=1, le=200, description="Max transactions to process in this request"),
+    limit: int = Query(64, ge=1, le=300, description="Max transactions to process in this request"),
 ):
     """Process up to *limit* pending transactions for *month*; use for progress UI."""
     _validate_month_ym(month)

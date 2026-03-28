@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import {
@@ -25,6 +25,7 @@ import { useMonthStore } from "@/stores/use-month-store"
 import { useUploadJobStore } from "@/stores/upload-job-store"
 import { formatMonthShort } from "@/utils/format"
 import { recentMonths } from "@/utils/month"
+import { inferStatementMonthFromFiles } from "@/utils/infer-month-from-filename"
 import { Loader2, X } from "lucide-react"
 
 function fileKey(f: File): string {
@@ -47,11 +48,15 @@ export default function UploadPage() {
   const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { month: storeMonth, setMonth: setStoreMonth } = useMonthStore()
-  const monthOptions = useMemo(() => recentMonths(36), [])
   const [month, setMonth] = useState(storeMonth)
+  const monthOptions = useMemo(() => {
+    const base = recentMonths(48)
+    return month && !base.includes(month) ? [month, ...base] : base
+  }, [month])
   const [files, setFiles] = useState<File[]>([])
   const [replaceMonth, setReplaceMonth] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const monthLockedByUserRef = useRef(false)
 
   const phase = useUploadJobStore((s) => s.phase)
   const jobMonth = useUploadJobStore((s) => s.month)
@@ -65,9 +70,26 @@ export default function UploadPage() {
   const jobRunning = phase === "uploading" || phase === "categorizing"
 
   const handleMonthChange = (m: string) => {
+    monthLockedByUserRef.current = true
     setMonth(m)
     setStoreMonth(m)
   }
+
+  useEffect(() => {
+    if (files.length === 0) {
+      monthLockedByUserRef.current = false
+      return
+    }
+    if (monthLockedByUserRef.current) return
+    const { month: inferred, conflict } = inferStatementMonthFromFiles(files)
+    if (inferred) {
+      setMonth(inferred)
+      setStoreMonth(inferred)
+      if (conflict) {
+        toast.info(t("upload.filenameMonthConflict"))
+      }
+    }
+  }, [files, setStoreMonth, t])
 
   const addFilesFromList = (list: FileList | File[]) => {
     const arr = Array.from(list)

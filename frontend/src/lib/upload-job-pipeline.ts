@@ -4,7 +4,7 @@ import { queryClient } from "@/lib/query-client"
 import { uploadXlsWithProgress } from "@/lib/upload-xhr"
 import { toast } from "sonner"
 
-const CHUNK_LIMIT = 25
+const CHUNK_LIMIT = 64
 const MAX_CHUNKS = 2000
 
 const _pipelines = new Set<string>()

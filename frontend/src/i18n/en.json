@@ -41,7 +41,8 @@
   "upload": {
     "title": "Upload report",
     "statementMonth": "Month for this data",
-    "statementMonthHint": "Everything is stored under the month you choose here. Names like Export_11_2025 often reflect when the bank ran the charge cycle (e.g. November), not the spend month. We never infer the month from the file name — your dropdown choice is always what counts.",
+    "statementMonthHint": "Everything is stored under the month you choose here. When the file name includes the billing cycle (e.g. 11_2025 = charged in November), we set the spend month to the previous calendar month (October) automatically. You can still change the month in the dropdown.",
+    "filenameMonthConflict": "Files suggest different months — using the first file’s date.",
     "mergeHint": "Partial mid-month exports are fine. Re-uploading the same month adds new rows; identical lines are skipped. You can upload several .xls files in one go (e.g. multiple cards).",
     "replaceHint": "Use “replace” only when you want the uploaded file(s) to become the full source of truth for that month. With multiple files, existing data is cleared once, then every file is imported in order.",
     "replaceCheckbox": "Replace all existing data for this month",
