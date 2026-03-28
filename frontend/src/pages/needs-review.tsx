@@ -21,15 +21,32 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Loader2, Plus } from "lucide-react"
+import { Loader2, Plus, Sparkles } from "lucide-react"
 import { useMonthStore } from "@/stores/use-month-store"
-import { getNeedsReview, categorizeTransaction } from "@/api/transactions"
+import {
+  getNeedsReview,
+  categorizeTransaction,
+  getLlmPendingCount,
+  llmCategorizePending,
+} from "@/api/transactions"
 import { listCategories, createCategory } from "@/api/categories"
 import { probeRulesAvailable } from "@/api/probe"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import type { Transaction } from "@/api/types"
 import { ApiError } from "@/api/client"
 import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+
+const LLM_PENDING_LIMIT = 500
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.body && typeof err.body === "object" && "detail" in err.body) {
@@ -72,11 +89,18 @@ export default function NeedsReviewPage() {
   const [createRuleFor, setCreateRuleFor] = useState<Set<number>>(new Set())
   const [pendingOtherForRow, setPendingOtherForRow] = useState<number | null>(null)
   const [newCategoryName, setNewCategoryName] = useState("")
+  const [aiDialogOpen, setAiDialogOpen] = useState(false)
 
   const { data: txns = [], isLoading } = useQuery({
     queryKey: ["needs-review", month],
     queryFn: () => getNeedsReview(month),
   })
+
+  const { data: llmPending } = useQuery({
+    queryKey: ["llm-pending-count", month],
+    queryFn: () => getLlmPendingCount(month),
+  })
+  const uncategorizedForAi = llmPending?.pending_count ?? 0
 
   const { data: categories = [] } = useQuery({
     queryKey: ["categories"],
@@ -101,6 +125,21 @@ export default function NeedsReviewPage() {
     },
     onError() {
       toast.error(t("review.createCategoryError"))
+    },
+  })
+
+  const llmSuggestMutation = useMutation({
+    mutationFn: () => llmCategorizePending(month, LLM_PENDING_LIMIT),
+    onSuccess() {
+      toast.success(t("review.aiSuggestSuccess"))
+      void qc.invalidateQueries({ queryKey: ["needs-review", month] })
+      void qc.invalidateQueries({ queryKey: ["llm-pending-count", month] })
+      void qc.invalidateQueries({ queryKey: ["summary", month] })
+      void qc.invalidateQueries({ queryKey: ["transactions"] })
+      setAiDialogOpen(false)
+    },
+    onError(err) {
+      toast.error(getErrorMessage(err, t("review.aiSuggestError")))
     },
   })
 
@@ -223,7 +262,7 @@ export default function NeedsReviewPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">{t("review.title")}</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">{t("review.month")}:</span>
           <Select value={month} onValueChange={handleMonthChange}>
             <SelectTrigger className="w-[140px]">
@@ -237,8 +276,57 @@ export default function NeedsReviewPage() {
               ))}
             </SelectContent>
           </Select>
+          {uncategorizedForAi > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setAiDialogOpen(true)}
+              disabled={llmSuggestMutation.isPending}
+            >
+              {llmSuggestMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              {llmSuggestMutation.isPending
+                ? t("review.aiSuggestRunning")
+                : t("review.aiSuggestButton", { count: uncategorizedForAi })}
+            </Button>
+          )}
         </div>
       </div>
+
+      <AlertDialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("review.aiSuggestTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("review.aiSuggestDescription", { limit: LLM_PENDING_LIMIT })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={llmSuggestMutation.isPending}>
+              {t("review.aiSuggestCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button
+                disabled={llmSuggestMutation.isPending}
+                onClick={(e) => {
+                  e.preventDefault()
+                  llmSuggestMutation.mutate()
+                }}
+              >
+                {llmSuggestMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : null}
+                {t("review.aiSuggestConfirm")}
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
         <Input

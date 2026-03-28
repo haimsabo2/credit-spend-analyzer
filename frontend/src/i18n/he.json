@@ -36,7 +36,16 @@
     "errorLoadingHint": "ודאו שהשרת (backend) רץ: מתיקיית backend הריצו uvicorn על פורט 8000, ואז רעננו — הדפדפן צריך להיות על אותו כתובת כמו שרת Vite (למשל http://127.0.0.1:5173).",
     "backendUnreachableBanner": "לא הצלחנו להתחבר לשרת ה־API (או שהוא לא רץ). זה לא קשור להעלאת קובץ — הריצו את ה־backend על פורט 8000 והשתמשו ב־npm run dev (לא preview בלי API). אחרי שהשרת רץ, רעננו את הדף.",
     "vsPreviousSubtitle": "מול {{month}}: {{amount}}",
-    "deltaVsPrevious": "{{delta}} לעומת החודש הקודם"
+    "deltaVsPrevious": "{{delta}} לעומת החודש הקודם",
+    "annualOverview": "סקירה שנתית",
+    "year": "שנה",
+    "monthTableMonth": "חודש",
+    "monthTableSpend": "הוצאה",
+    "monthTableTxns": "עסקאות",
+    "monthDetailHeading": "פרטי חודש",
+    "noMonthData": "אין נתונים",
+    "clickMonthHint": "בחרו שורה או עמודה בגרף כדי לראות את החודש למטה.",
+    "tooltipTxnSuffix": " · {{count}} עסקאות"
   },
   "upload": {
     "title": "העלאת דוח",
@@ -87,6 +96,7 @@
       "llm_queue": "מודל שפה: {{unique}} תיאורי סוחר ייחודיים מתוך {{rows}} שורות; בערך {{batchesTotal}} קריאות למודל בחבילה הזו…",
       "llm_batch": "מודל שפה: קריאה {{batch}} מתוך {{batchesTotal}} בחבילה הזו…",
       "classification_local": "סיווג מקומי בלבד בחבילה הזו ({{rows}} שורות); בלי קריאות AI.",
+      "skipped_llm_pending_user": "חוקים ומילון הוחלו; {{rows}} שורות נשארו לבדיקה ידנית או ל-AI אופציונלי (מסך נדרש בדיקה).",
       "unknown": "מעבד…"
     }
   },
@@ -120,7 +130,15 @@
     "addCategory": "הוסף",
     "createCategoryError": "שגיאה ביצירת קטגוריה",
     "willUpdateSimilar": "יעדכן גם {{count}} עסקאות דומות",
-    "emptyValue": "—"
+    "emptyValue": "—",
+    "aiSuggestTitle": "להציע קטגוריות עם AI?",
+    "aiSuggestDescription": "נשלחות עד {{limit}} עסקאות בלי קטגוריה בחודש הזה למודל השפה. אפשר לערוך אחר כך.",
+    "aiSuggestConfirm": "הרץ AI",
+    "aiSuggestCancel": "ביטול",
+    "aiSuggestButton": "הצעה עם AI ({{count}})",
+    "aiSuggestRunning": "מריץ AI…",
+    "aiSuggestSuccess": "ההצעות מהמודל הוחלו",
+    "aiSuggestError": "סיווג AI נכשל"
   },
   "transactionsTable": {
     "title": "עסקאות",

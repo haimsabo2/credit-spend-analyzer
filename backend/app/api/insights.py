@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Query
 from sqlalchemy import text
@@ -17,6 +17,45 @@ from ..schemas import (
 from ..utils import prior_months as _prior_months
 
 router = APIRouter()
+
+
+def _category_series_for_months(session, month_labels: list[str]) -> dict[str, list[float]]:
+    if not month_labels:
+        return {}
+    months_list = ",".join(f"'{m}'" for m in month_labels)
+    top_cat_rows = session.execute(
+        text(f"""
+            SELECT t.category_id, SUM(t.amount) AS total
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  u.month IN ({months_list})
+              AND  t.category_id IS NOT NULL
+            GROUP  BY t.category_id
+            ORDER  BY total DESC
+            LIMIT  8
+        """),
+    ).all()
+    top_cat_ids = [r.category_id for r in top_cat_rows]
+    category_series: dict[str, list[float]] = {}
+    if not top_cat_ids:
+        return category_series
+    placeholders = ",".join(str(cid) for cid in top_cat_ids)
+    cat_monthly = session.execute(
+        text(f"""
+            SELECT u.month, t.category_id, SUM(t.amount) AS total
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  u.month IN ({months_list})
+              AND  t.category_id IN ({placeholders})
+            GROUP  BY u.month, t.category_id
+        """),
+    ).all()
+    lookup: dict[tuple[str, int], float] = {}
+    for r in cat_monthly:
+        lookup[(r.month, r.category_id)] = r.total
+    for cid in top_cat_ids:
+        category_series[str(cid)] = [lookup.get((m, cid), 0.0) for m in month_labels]
+    return category_series
 
 
 # ── GET /api/insights/summary ──────────────────────────────────────────────
@@ -111,11 +150,42 @@ def get_summary(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-\d
 
 
 @router.get("/trends", response_model=TrendsResponse)
-def get_trends(session: SessionDep, months: int = Query(12, ge=1, le=60)):
+def get_trends(
+    session: SessionDep,
+    months: int = Query(12, ge=1, le=60),
+    year: Optional[int] = Query(None, ge=1990, le=2100),
+):
+    if year is not None:
+        month_labels = [f"{year}-{m:02d}" for m in range(1, 13)]
+        start_m, end_m = month_labels[0], month_labels[-1]
+        rows = session.execute(
+            text("""
+                SELECT u.month,
+                       COALESCE(SUM(t.amount), 0) AS total,
+                       COUNT(*) AS txn_count
+                FROM   "transaction" t
+                JOIN   upload u ON t.upload_id = u.id
+                WHERE  u.month >= :start_m AND u.month <= :end_m
+                GROUP  BY u.month
+            """),
+            {"start_m": start_m, "end_m": end_m},
+        ).all()
+        lookup = {r.month: (float(r.total), int(r.txn_count)) for r in rows}
+        total_spend_series = [lookup.get(m, (0.0, 0))[0] for m in month_labels]
+        txn_count_series = [lookup.get(m, (0.0, 0))[1] for m in month_labels]
+        category_series = _category_series_for_months(session, month_labels)
+        return TrendsResponse(
+            months=month_labels,
+            total_spend_series=total_spend_series,
+            category_series=category_series,
+            txn_count_series=txn_count_series,
+        )
+
     monthly_rows = session.execute(
         text("""
             SELECT u.month,
-                   SUM(t.amount) AS total
+                   SUM(t.amount) AS total,
+                   COUNT(*) AS txn_count
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
             GROUP  BY u.month
@@ -126,55 +196,23 @@ def get_trends(session: SessionDep, months: int = Query(12, ge=1, le=60)):
     ).all()
 
     month_labels = [r.month for r in reversed(monthly_rows)]
-    total_spend_series = [r.total for r in reversed(monthly_rows)]
+    total_spend_series = [float(r.total) for r in reversed(monthly_rows)]
+    txn_count_series = [int(r.txn_count) for r in reversed(monthly_rows)]
 
     if not month_labels:
-        return TrendsResponse(months=[], total_spend_series=[], category_series={})
+        return TrendsResponse(
+            months=[],
+            total_spend_series=[],
+            category_series={},
+            txn_count_series=[],
+        )
 
-    top_cat_rows = session.execute(
-        text("""
-            SELECT t.category_id, SUM(t.amount) AS total
-            FROM   "transaction" t
-            JOIN   upload u ON t.upload_id = u.id
-            WHERE  u.month IN ({months_list})
-              AND  t.category_id IS NOT NULL
-            GROUP  BY t.category_id
-            ORDER  BY total DESC
-            LIMIT  8
-        """.format(months_list=",".join(f"'{m}'" for m in month_labels))),
-    ).all()
-    top_cat_ids = [r.category_id for r in top_cat_rows]
-
-    category_series: dict[str, list[float]] = {}
-    if top_cat_ids:
-        placeholders = ",".join(str(cid) for cid in top_cat_ids)
-        cat_monthly = session.execute(
-            text("""
-                SELECT u.month, t.category_id, SUM(t.amount) AS total
-                FROM   "transaction" t
-                JOIN   upload u ON t.upload_id = u.id
-                WHERE  u.month IN ({months_list})
-                  AND  t.category_id IN ({cat_ids})
-                GROUP  BY u.month, t.category_id
-            """.format(
-                months_list=",".join(f"'{m}'" for m in month_labels),
-                cat_ids=placeholders,
-            )),
-        ).all()
-
-        lookup: dict[tuple[str, int], float] = {}
-        for r in cat_monthly:
-            lookup[(r.month, r.category_id)] = r.total
-
-        for cid in top_cat_ids:
-            category_series[str(cid)] = [
-                lookup.get((m, cid), 0.0) for m in month_labels
-            ]
-
+    category_series = _category_series_for_months(session, month_labels)
     return TrendsResponse(
         months=month_labels,
         total_spend_series=total_spend_series,
         category_series=category_series,
+        txn_count_series=txn_count_series,
     )
 
 

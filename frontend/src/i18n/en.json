@@ -36,7 +36,16 @@
     "errorLoadingHint": "Make sure the API is running: from the backend folder run uvicorn on port 8000, then refresh. Open the app via the Vite dev URL (e.g. http://127.0.0.1:5173) so /api requests are proxied.",
     "backendUnreachableBanner": "Could not reach the API (backend may be stopped). This is not related to file upload. Start the backend on port 8000 and use npm run dev so /api is proxied. After the API is up, refresh the page.",
     "vsPreviousSubtitle": "vs {{month}}: {{amount}}",
-    "deltaVsPrevious": "{{delta}} vs previous month"
+    "deltaVsPrevious": "{{delta}} vs previous month",
+    "annualOverview": "Year overview",
+    "year": "Year",
+    "monthTableMonth": "Month",
+    "monthTableSpend": "Spend",
+    "monthTableTxns": "Transactions",
+    "monthDetailHeading": "Month details",
+    "noMonthData": "No data",
+    "clickMonthHint": "Select a row or bar to see that month below.",
+    "tooltipTxnSuffix": " · {{count}} transactions"
   },
   "upload": {
     "title": "Upload report",
@@ -87,6 +96,7 @@
       "llm_queue": "AI model: {{unique}} unique merchant line(s) from {{rows}} row(s); about {{batchesTotal}} model call(s) for this batch…",
       "llm_batch": "AI model: call {{batch}} of {{batchesTotal}} for this batch…",
       "classification_local": "Local classification only for this batch ({{rows}} row(s)); no AI calls.",
+      "skipped_llm_pending_user": "Rules and dictionary applied; {{rows}} row(s) left for manual review or optional AI (Needs Review page).",
       "unknown": "Working…"
     }
   },
@@ -120,7 +130,15 @@
     "addCategory": "Add",
     "createCategoryError": "Error creating category",
     "willUpdateSimilar": "Will also update {{count}} similar transactions",
-    "emptyValue": "—"
+    "emptyValue": "—",
+    "aiSuggestTitle": "Suggest categories with AI?",
+    "aiSuggestDescription": "This sends up to {{limit}} uncategorized rows for this month to the language model. You can still edit results afterward.",
+    "aiSuggestConfirm": "Run AI",
+    "aiSuggestCancel": "Cancel",
+    "aiSuggestButton": "Suggest with AI ({{count}})",
+    "aiSuggestRunning": "Running AI…",
+    "aiSuggestSuccess": "AI suggestions applied",
+    "aiSuggestError": "AI categorization failed"
   },
   "transactionsTable": {
     "title": "Transactions",

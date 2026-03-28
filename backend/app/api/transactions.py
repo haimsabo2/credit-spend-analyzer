@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlmodel import Session, func, select
 
 from ..dependencies import SessionDep
@@ -14,10 +14,15 @@ from ..schemas import (
     CategorizeQueueResponse,
     CategorizeRequest,
     CategorizeResponse,
+    LlmPendingCountResponse,
     SpendPatternUpdate,
     TransactionRead,
 )
-from ..services.batch_categorize import batch_categorize_transactions
+from ..services.batch_categorize import (
+    REASON_PENDING_MANUAL_OR_AI,
+    batch_categorize_transactions,
+    llm_categorize_transactions,
+)
 from ..services.spend_pattern import ALLOWED_SPEND_PATTERNS
 from ..services.classification import apply_single_rule
 
@@ -37,17 +42,40 @@ def _validate_month_ym(month: str) -> None:
         raise HTTPException(422, detail="month must be YYYY-MM")
 
 
+def _pending_auto_categorize_clause():
+    """Rows rules/dictionary can still change (excludes stuck uncategorized awaiting user/AI)."""
+    uncat_not_stuck = and_(
+        Transaction.category_id == None,  # noqa: E711
+        or_(
+            Transaction.reason_he.is_(None),
+            Transaction.reason_he != REASON_PENDING_MANUAL_OR_AI,
+        ),
+    )
+    low_conf = and_(
+        Transaction.category_id != None,  # noqa: E711
+        Transaction.confidence < 0.6,
+    )
+    return or_(uncat_not_stuck, low_conf)
+
+
 def pending_categorization_count(session: Session, month: str) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(Transaction)
+        .join(Upload, Transaction.upload_id == Upload.id)
+        .where(Upload.month == month, _pending_auto_categorize_clause())
+    )
+    return int(session.exec(stmt).one())
+
+
+def llm_pending_uncategorized_count(session: Session, month: str) -> int:
     stmt = (
         select(func.count())
         .select_from(Transaction)
         .join(Upload, Transaction.upload_id == Upload.id)
         .where(
             Upload.month == month,
-            or_(
-                Transaction.category_id == None,  # noqa: E711
-                Transaction.confidence < 0.6,
-            ),
+            Transaction.category_id == None,  # noqa: E711
         )
     )
     return int(session.exec(stmt).one())
@@ -203,21 +231,15 @@ def auto_categorize(
     If force=false (default): only uncategorized or low-confidence transactions.
     If force=true: all transactions; overwrites category_id, confidence, reason_he, needs_review.
 
-    Tries three layers: DB rules, keyword dictionary, then LLM.
+    Tries DB rules and keyword dictionary; LLM runs only if CSA_AUTO_CATEGORIZE_USE_LLM is true.
+    Otherwise use POST /transactions/llm-categorize-pending for opt-in AI.
     """
     if force:
         stmt = select(Transaction).join(Upload).where(Upload.month == month)
     else:
-        stmt = (
-            select(Transaction)
-            .join(Upload)
-            .where(
-                Upload.month == month,
-                or_(
-                    Transaction.category_id == None,  # noqa: E711
-                    Transaction.confidence < 0.6,
-                ),
-            )
+        stmt = select(Transaction).join(Upload).where(
+            Upload.month == month,
+            _pending_auto_categorize_clause(),
         )
     txns = list(session.exec(stmt).all())
     return batch_categorize_transactions(session, txns)
@@ -231,6 +253,41 @@ def categorize_queue(session: SessionDep, month: str = Query(..., description="S
     return CategorizeQueueResponse(pending_count=n)
 
 
+@router.get(
+    "/llm-categorize-pending/count",
+    response_model=LlmPendingCountResponse,
+)
+def llm_categorize_pending_count(
+    session: SessionDep,
+    month: str = Query(..., description="Statement month YYYY-MM"),
+):
+    """Count uncategorized rows in the month (category_id IS NULL)."""
+    _validate_month_ym(month)
+    return LlmPendingCountResponse(pending_count=llm_pending_uncategorized_count(session, month))
+
+
+@router.post("/llm-categorize-pending", response_model=AutoCategorizeSummary)
+def llm_categorize_pending(
+    session: SessionDep,
+    month: str = Query(..., description="Statement month YYYY-MM"),
+    limit: int = Query(300, ge=1, le=500, description="Max rows to send to the model"),
+):
+    """Opt-in AI categorization for uncategorized rows only (rules/dictionary are not re-run)."""
+    _validate_month_ym(month)
+    stmt = (
+        select(Transaction)
+        .join(Upload)
+        .where(
+            Upload.month == month,
+            Transaction.category_id == None,  # noqa: E711
+        )
+        .order_by(Transaction.id.asc())
+        .limit(limit)
+    )
+    txns = list(session.exec(stmt).all())
+    return llm_categorize_transactions(session, txns)
+
+
 @router.post("/auto-categorize-chunk", response_model=AutoCategorizeChunkResponse)
 def auto_categorize_chunk(
     session: SessionDep,
@@ -242,13 +299,7 @@ def auto_categorize_chunk(
     stmt = (
         select(Transaction)
         .join(Upload)
-        .where(
-            Upload.month == month,
-            or_(
-                Transaction.category_id == None,  # noqa: E711
-                Transaction.confidence < 0.6,
-            ),
-        )
+        .where(Upload.month == month, _pending_auto_categorize_clause())
         .order_by(Transaction.id.asc())
         .limit(limit)
     )

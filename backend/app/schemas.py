@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from sqlmodel import SQLModel
 
 from .spend_pattern_constants import ALLOWED_SPEND_PATTERNS
@@ -45,6 +45,12 @@ class UploadCreateResponse(SQLModel):
 
 
 class CategorizeQueueResponse(SQLModel):
+    pending_count: int
+
+
+class LlmPendingCountResponse(SQLModel):
+    """Rows in the month with no category (candidates for opt-in AI categorization)."""
+
     pending_count: int
 
 
@@ -166,6 +172,7 @@ class TrendsResponse(SQLModel):
     months: List[str]
     total_spend_series: List[float]
     category_series: Dict[str, List[float]]
+    txn_count_series: List[int] = Field(default_factory=list)
 
 
 class AnomalyItem(SQLModel):

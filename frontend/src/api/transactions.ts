@@ -42,3 +42,20 @@ export async function autoCategorize(
     { month: month, force: force },
   )
 }
+
+export async function getLlmPendingCount(month: string): Promise<{ pending_count: number }> {
+  return api.get<{ pending_count: number }>("/transactions/llm-categorize-pending/count", {
+    month,
+  })
+}
+
+export async function llmCategorizePending(
+  month: string,
+  limit = 300,
+): Promise<AutoCategorizeSummary> {
+  return api.post<AutoCategorizeSummary>(
+    "/transactions/llm-categorize-pending",
+    undefined,
+    { month, limit },
+  )
+}

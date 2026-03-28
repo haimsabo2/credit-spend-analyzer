@@ -62,18 +62,29 @@ def test_auto_categorize_response_schema(client: TestClient, seeded_month: str):
 
 
 def test_auto_categorize_updates_rows(client: TestClient, seeded_month: str):
-    """Upload already runs categorization; rows should have categories, and auto-categorize is consistent."""
+    """Upload runs rules/dictionary (no default LLM); auto-categorize stays consistent with pending queue."""
     txns = client.get("/api/transactions", params={"month": seeded_month, "limit": 50}).json()
-    categorized_txns = [t for t in txns if t["category_id"] is not None]
-    assert len(categorized_txns) > 0
-    for t in categorized_txns:
-        assert t["confidence"] > 0
+    assert len(txns) > 0
+    for t in txns:
+        if t["category_id"] is not None:
+            assert t["confidence"] > 0
 
     resp = client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
     assert resp.status_code == 200
     body = resp.json()
     if body["processed"] > 0:
         assert body["categorized"] + body["needs_review"] + body["failed"] == body["processed"]
+
+
+def test_auto_categorize_does_not_invoke_llm_batch(client: TestClient, seeded_month: str):
+    """Default path must not call OpenAI batch categorization."""
+    with patch(
+        "backend.app.services.batch_categorize.categorize_transactions_batch",
+    ) as mock_batch:
+        mock_batch.side_effect = AssertionError("categorize_transactions_batch must not run")
+        resp = client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
+        assert resp.status_code == 200
+        mock_batch.assert_not_called()
 
 
 @patch(
@@ -85,6 +96,10 @@ def test_needs_review_endpoint(mock_batch, client: TestClient, seeded_month: str
     }
     client.post("/api/admin/reset-categorization", params={"month": seeded_month})
     client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
+    client.post(
+        "/api/transactions/llm-categorize-pending",
+        params={"month": seeded_month, "limit": 500},
+    )
 
     resp = client.get("/api/transactions/needs-review", params={"month": seeded_month})
     assert resp.status_code == 200
@@ -92,6 +107,31 @@ def test_needs_review_endpoint(mock_batch, client: TestClient, seeded_month: str
     assert isinstance(data, list)
     for t in data:
         assert t["needs_review"] is True
+
+
+@patch("backend.app.services.batch_categorize.categorize_transactions_batch")
+def test_llm_categorize_pending_invokes_batch(mock_batch, client: TestClient, seeded_month: str):
+    mock_batch.side_effect = lambda txns: {
+        t.id: MOCK_LLM_RESULT_NEEDS_REVIEW for t in txns
+    }
+    client.post("/api/admin/reset-categorization", params={"month": seeded_month})
+    client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
+    mock_batch.reset_mock()
+    cnt_res = client.get(
+        "/api/transactions/llm-categorize-pending/count",
+        params={"month": seeded_month},
+    )
+    assert cnt_res.status_code == 200
+    pending = cnt_res.json()["pending_count"]
+    resp = client.post(
+        "/api/transactions/llm-categorize-pending",
+        params={"month": seeded_month, "limit": 500},
+    )
+    assert resp.status_code == 200
+    if pending > 0:
+        assert mock_batch.called
+    else:
+        assert resp.json()["processed"] == 0
 
 
 def test_auto_categorize_force_param(client: TestClient, seeded_month: str):

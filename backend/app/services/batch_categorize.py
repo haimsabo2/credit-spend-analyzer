@@ -1,4 +1,4 @@
-"""Batch categorization: rules, keyword dictionary, then LLM (same pipeline as auto-categorize API)."""
+"""Batch categorization: rules, keyword dictionary, optional LLM (opt-in via settings)."""
 
 from __future__ import annotations
 
@@ -18,9 +18,11 @@ from .categorizer import categorize_transaction as llm_categorize
 from .categorizer import categorize_transactions_batch
 from .categorizer import transaction_llm_dedupe_key
 from .dictionary_rules import dictionary_categorize
-from .spend_pattern import apply_auto_spend_pattern
+from .spend_pattern_refresh import refresh_auto_spend_patterns
 
 logger = logging.getLogger(__name__)
+
+REASON_PENDING_MANUAL_OR_AI = "pending:manual_or_ai"
 
 _MAX_FAILURE_SAMPLES = 5
 _BATCH_SIZE = 25
@@ -64,13 +66,212 @@ def _group_transactions_for_llm_dedupe(
     return reps, rep_to_all
 
 
+def _run_llm_categorization_core(
+    session: Session,
+    llm_ready: List[Transaction],
+    *,
+    progress_sink: Optional[list[dict[str, Any]]] = None,
+) -> tuple[int, int, int, list[str]]:
+    """LLM batches + apply; returns (categorized, needs_review_count, failed, failures_sample)."""
+    categorized = 0
+    needs_review_count = 0
+    failed = 0
+    failures_sample: list[str] = []
+
+    settings = get_settings()
+    by_id: dict[int, tuple[LLMCategorizationResult | None, Exception | None]] = {}
+
+    llm_reps, rep_id_to_group = _group_transactions_for_llm_dedupe(llm_ready)
+    saved = len(llm_ready) - len(llm_reps)
+    if saved > 0:
+        logger.info(
+            "LLM dedupe: %d rows -> %d unique signatures (%d fewer API rows)",
+            len(llm_ready),
+            len(llm_reps),
+            saved,
+        )
+
+    rep_chunks = _chunk_transactions(llm_reps, settings.categorize_llm_batch_size)
+    total_llm_batches = len(rep_chunks)
+    _progress_emit(
+        progress_sink,
+        "llm_queue",
+        rows=len(llm_ready),
+        unique=len(llm_reps),
+        batches_total=total_llm_batches,
+    )
+
+    def _fan_out_result(
+        chunk_reps: List[Transaction],
+        pair_for_rep_id: dict[int, tuple[LLMCategorizationResult | None, Exception | None]],
+    ) -> None:
+        for rep in chunk_reps:
+            assert rep.id is not None
+            pair = pair_for_rep_id[rep.id]
+            for t in rep_id_to_group[rep.id]:
+                assert t.id is not None
+                by_id[t.id] = pair
+
+    for batch_idx, chunk in enumerate(rep_chunks, start=1):
+        _progress_emit(
+            progress_sink,
+            "llm_batch",
+            batch=batch_idx,
+            batches_total=total_llm_batches,
+        )
+        pair_by_rep: dict[int, tuple[LLMCategorizationResult | None, Exception | None]] = {}
+        try:
+            batch_map = categorize_transactions_batch(chunk)
+            for rep in chunk:
+                assert rep.id is not None
+                res = batch_map[rep.id]
+                pair_by_rep[rep.id] = (res, None)
+            _fan_out_result(chunk, pair_by_rep)
+        except Exception as batch_exc:
+            logger.warning(
+                "LLM batch failed (%d reps), falling back per representative: %s",
+                len(chunk),
+                batch_exc,
+            )
+            for rep in chunk:
+                assert rep.id is not None
+                tid, res, err = _run_llm_safe(rep)
+                pair_by_rep[tid] = (res, err)
+            _fan_out_result(chunk, pair_by_rep)
+
+    for idx, txn in enumerate(llm_ready, 1):
+        tx_id = txn.id
+        pair = by_id.get(tx_id)
+        if pair is None:
+            failed += 1
+            if len(failures_sample) < _MAX_FAILURE_SAMPLES:
+                failures_sample.append(f"tx {tx_id}: missing LLM result")
+            txn.needs_review = True
+            session.add(txn)
+            continue
+        result, err = pair
+        if err is not None:
+            failed += 1
+            if len(failures_sample) < _MAX_FAILURE_SAMPLES:
+                failures_sample.append(f"tx {tx_id}: {err}")
+            txn.needs_review = True
+            session.add(txn)
+            continue
+        if result is None:
+            failed += 1
+            if len(failures_sample) < _MAX_FAILURE_SAMPLES:
+                failures_sample.append(f"tx {tx_id}: empty LLM result")
+            txn.needs_review = True
+            session.add(txn)
+            continue
+
+        try:
+            with session.no_autoflush:
+                cat_id = get_category_id_by_name_he(session, result.category_name_he)
+            txn.category_id = cat_id
+            txn.confidence = result.confidence
+            txn.reason_he = result.reason_he
+            txn.needs_review = result.needs_review
+
+            if result.suggested_new_category is not None:
+                txn.meta_json = json.dumps(
+                    {
+                        "suggest_new_category": {
+                            "name_he": result.suggested_new_category.name_he,
+                            "why_needed_he": result.suggested_new_category.why_needed_he,
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+                txn.needs_review = True
+
+            session.add(txn)
+            logger.info("tx %s -> llm (%s)", tx_id, result.category_name_he)
+
+            if txn.needs_review:
+                needs_review_count += 1
+            else:
+                categorized += 1
+        except Exception as exc:
+            session.rollback()
+            logger.warning("Categorization apply failed for tx %s: %s", tx_id, exc)
+            failed += 1
+            if len(failures_sample) < _MAX_FAILURE_SAMPLES:
+                failures_sample.append(f"tx {tx_id}: {exc}")
+            continue
+
+        if idx % _BATCH_SIZE == 0:
+            session.commit()
+
+    session.commit()
+    return categorized, needs_review_count, failed, failures_sample
+
+
+def llm_categorize_transactions(
+    session: Session,
+    txns: List[Transaction],
+    *,
+    progress_sink: Optional[list[dict[str, Any]]] = None,
+) -> AutoCategorizeSummary:
+    """Run LLM-only categorization for the given rows (rules/dictionary skipped)."""
+    processed = len(txns)
+    if not txns:
+        return AutoCategorizeSummary(
+            processed=0,
+            categorized=0,
+            needs_review=0,
+            failed=0,
+            failures_sample=[],
+        )
+
+    refresh_failed: set[int] = set()
+    for txn in txns:
+        try:
+            session.refresh(txn)
+        except Exception as exc:
+            logger.warning("refresh failed for tx %s before LLM: %s", txn.id, exc)
+            refresh_failed.add(txn.id if txn.id is not None else -1)
+
+    llm_ready = [t for t in txns if t.id not in refresh_failed]
+    failed = len(refresh_failed)
+    failures_sample: list[str] = []
+    for tid in refresh_failed:
+        if tid < 0:
+            continue
+        if len(failures_sample) < _MAX_FAILURE_SAMPLES:
+            failures_sample.append(f"tx {tid}: refresh failed")
+
+    if not llm_ready:
+        refresh_auto_spend_patterns(session)
+        return AutoCategorizeSummary(
+            processed=processed,
+            categorized=0,
+            needs_review=0,
+            failed=failed,
+            failures_sample=failures_sample,
+        )
+
+    _progress_emit(progress_sink, "rules_dictionary", rows=0)
+    cat, nrev, f2, fs2 = _run_llm_categorization_core(session, llm_ready, progress_sink=progress_sink)
+    failures_sample.extend(fs2)
+    failures_sample = failures_sample[:_MAX_FAILURE_SAMPLES]
+    refresh_auto_spend_patterns(session)
+    return AutoCategorizeSummary(
+        processed=processed,
+        categorized=cat,
+        needs_review=nrev,
+        failed=failed + f2,
+        failures_sample=failures_sample,
+    )
+
+
 def batch_categorize_transactions(
     session: Session,
     txns: List[Transaction],
     *,
     progress_sink: Optional[list[dict[str, Any]]] = None,
 ) -> AutoCategorizeSummary:
-    """Run rules, dictionary, then LLM (batched + deduped by merchant fingerprint)."""
+    """Run rules and dictionary; LLM only if settings.auto_categorize_use_llm is true."""
     processed = len(txns)
     _progress_emit(progress_sink, "rules_dictionary", rows=processed)
     categorized = 0
@@ -94,7 +295,6 @@ def batch_categorize_transactions(
                 txn.rule_id_applied = rule.id
                 txn.needs_review = False
                 txn.reason_he = f"rule:{rule.pattern}"
-                apply_auto_spend_pattern(txn, None)
                 session.add(txn)
                 categorized += 1
                 logger.info("tx %s -> rule (pattern=%s)", tx_id, rule.pattern)
@@ -111,7 +311,6 @@ def batch_categorize_transactions(
                 txn.confidence = dict_hit.confidence
                 txn.reason_he = dict_hit.reason_he
                 txn.needs_review = False
-                apply_auto_spend_pattern(txn, None)
                 session.add(txn)
                 categorized += 1
                 logger.info("tx %s -> dict (%s)", tx_id, dict_hit.category_name_he)
@@ -144,137 +343,38 @@ def batch_categorize_transactions(
 
     llm_ready = [t for t in llm_needed if t.id not in refresh_failed]
 
+    settings = get_settings()
     if llm_ready:
-        settings = get_settings()
-        by_id: dict[int, tuple[LLMCategorizationResult | None, Exception | None]] = {}
-
-        llm_reps, rep_id_to_group = _group_transactions_for_llm_dedupe(llm_ready)
-        saved = len(llm_ready) - len(llm_reps)
-        if saved > 0:
-            logger.info(
-                "LLM dedupe: %d rows -> %d unique signatures (%d fewer API rows)",
-                len(llm_ready),
-                len(llm_reps),
-                saved,
+        if settings.auto_categorize_use_llm:
+            cat, nrev, f2, fs2 = _run_llm_categorization_core(
+                session, llm_ready, progress_sink=progress_sink
             )
-
-        rep_chunks = _chunk_transactions(llm_reps, settings.categorize_llm_batch_size)
-        total_llm_batches = len(rep_chunks)
-        _progress_emit(
-            progress_sink,
-            "llm_queue",
-            rows=len(llm_ready),
-            unique=len(llm_reps),
-            batches_total=total_llm_batches,
-        )
-
-        def _fan_out_result(
-            chunk_reps: List[Transaction],
-            pair_for_rep_id: dict[int, tuple[LLMCategorizationResult | None, Exception | None]],
-        ) -> None:
-            for rep in chunk_reps:
-                assert rep.id is not None
-                pair = pair_for_rep_id[rep.id]
-                for t in rep_id_to_group[rep.id]:
-                    assert t.id is not None
-                    by_id[t.id] = pair
-
-        for batch_idx, chunk in enumerate(rep_chunks, start=1):
+            categorized += cat
+            needs_review_count += nrev
+            failed += f2
+            for s in fs2:
+                if len(failures_sample) < _MAX_FAILURE_SAMPLES:
+                    failures_sample.append(s)
+        else:
             _progress_emit(
                 progress_sink,
-                "llm_batch",
-                batch=batch_idx,
-                batches_total=total_llm_batches,
+                "skipped_llm_pending_user",
+                rows=len(llm_ready),
             )
-            pair_by_rep: dict[int, tuple[LLMCategorizationResult | None, Exception | None]] = {}
-            try:
-                batch_map = categorize_transactions_batch(chunk)
-                for rep in chunk:
-                    assert rep.id is not None
-                    res = batch_map[rep.id]
-                    pair_by_rep[rep.id] = (res, None)
-                _fan_out_result(chunk, pair_by_rep)
-            except Exception as batch_exc:
-                logger.warning(
-                    "LLM batch failed (%d reps), falling back per representative: %s",
-                    len(chunk),
-                    batch_exc,
-                )
-                for rep in chunk:
-                    assert rep.id is not None
-                    tid, res, err = _run_llm_safe(rep)
-                    pair_by_rep[tid] = (res, err)
-                _fan_out_result(chunk, pair_by_rep)
-
-        for idx, txn in enumerate(llm_ready, 1):
-            tx_id = txn.id
-            pair = by_id.get(tx_id)
-            if pair is None:
-                failed += 1
-                if len(failures_sample) < _MAX_FAILURE_SAMPLES:
-                    failures_sample.append(f"tx {tx_id}: missing LLM result")
+            for txn in llm_ready:
+                txn.category_id = None
                 txn.needs_review = True
+                txn.reason_he = REASON_PENDING_MANUAL_OR_AI
+                txn.confidence = 0.0
+                txn.rule_id_applied = None
                 session.add(txn)
-                continue
-            result, err = pair
-            if err is not None:
-                failed += 1
-                if len(failures_sample) < _MAX_FAILURE_SAMPLES:
-                    failures_sample.append(f"tx {tx_id}: {err}")
-                txn.needs_review = True
-                session.add(txn)
-                continue
-            if result is None:
-                failed += 1
-                if len(failures_sample) < _MAX_FAILURE_SAMPLES:
-                    failures_sample.append(f"tx {tx_id}: empty LLM result")
-                txn.needs_review = True
-                session.add(txn)
-                continue
-
-            try:
-                with session.no_autoflush:
-                    cat_id = get_category_id_by_name_he(session, result.category_name_he)
-                txn.category_id = cat_id
-                txn.confidence = result.confidence
-                txn.reason_he = result.reason_he
-                txn.needs_review = result.needs_review
-
-                if result.suggested_new_category is not None:
-                    txn.meta_json = json.dumps(
-                        {
-                            "suggest_new_category": {
-                                "name_he": result.suggested_new_category.name_he,
-                                "why_needed_he": result.suggested_new_category.why_needed_he,
-                            }
-                        },
-                        ensure_ascii=False,
-                    )
-                    txn.needs_review = True
-
-                apply_auto_spend_pattern(txn, result.spend_pattern)
-                session.add(txn)
-                logger.info("tx %s -> llm (%s)", tx_id, result.category_name_he)
-
-                if txn.needs_review:
-                    needs_review_count += 1
-                else:
-                    categorized += 1
-            except Exception as exc:
-                session.rollback()
-                logger.warning("Categorization apply failed for tx %s: %s", tx_id, exc)
-                failed += 1
-                if len(failures_sample) < _MAX_FAILURE_SAMPLES:
-                    failures_sample.append(f"tx {tx_id}: {exc}")
-                continue
-
-            if idx % _BATCH_SIZE == 0:
-                session.commit()
-
+            needs_review_count += len(llm_ready)
+            session.commit()
     else:
         _progress_emit(progress_sink, "classification_local", rows=processed)
 
     session.commit()
+    refresh_auto_spend_patterns(session)
 
     return AutoCategorizeSummary(
         processed=processed,

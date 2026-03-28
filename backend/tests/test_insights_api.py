@@ -101,6 +101,8 @@ def test_trends_shape(seeded_client: TestClient):
     assert isinstance(data["months"], list)
     assert isinstance(data["total_spend_series"], list)
     assert len(data["total_spend_series"]) == len(data["months"])
+    assert isinstance(data["txn_count_series"], list)
+    assert len(data["txn_count_series"]) == len(data["months"])
     assert isinstance(data["category_series"], dict)
 
     for month_str in data["months"]:
@@ -113,12 +115,38 @@ def test_trends_shape(seeded_client: TestClient):
 
 
 def test_trends_empty(client: TestClient):
-    """With a window that has no data, return empty lists."""
+    """Rolling trends align counts with months (may be non-empty if DB has data)."""
     r = client.get("/api/insights/trends", params={"months": 1})
     assert r.status_code == 200
     data = r.json()
     assert isinstance(data["months"], list)
     assert isinstance(data["total_spend_series"], list)
+    assert isinstance(data["txn_count_series"], list)
+    assert len(data["txn_count_series"]) == len(data["months"])
+
+
+def test_trends_year_twelve_months(seeded_client: TestClient):
+    """Calendar year view returns 12 slots; sparse data fills zeros elsewhere."""
+    r = seeded_client.get("/api/insights/trends", params={"year": 2026})
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["months"]) == 12
+    assert data["months"][0] == "2026-01"
+    assert data["months"][11] == "2026-12"
+    assert len(data["total_spend_series"]) == 12
+    assert len(data["txn_count_series"]) == 12
+    assert sum(data["total_spend_series"]) > 0
+    idx = data["months"].index("2026-04")
+    assert data["txn_count_series"][idx] > 0
+
+
+def test_trends_year_all_zeros(client: TestClient):
+    r = client.get("/api/insights/trends", params={"year": 1999})
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["months"]) == 12
+    assert all(x == 0 for x in data["total_spend_series"])
+    assert data["txn_count_series"] == [0] * 12
 
 
 # ── Anomalies ─────────────────────────────────────────────────────────────

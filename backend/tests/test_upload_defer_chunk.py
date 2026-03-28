@@ -73,4 +73,5 @@ def test_categorize_queue_and_chunk(client: TestClient, fixture_file: Path):
         "llm_queue",
         "llm_batch",
         "classification_local",
+        "skipped_llm_pending_user",
     )

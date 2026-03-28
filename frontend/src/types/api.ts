@@ -130,6 +130,8 @@ export interface TrendsResponse {
   months: string[]
   total_spend_series: number[]
   category_series: Record<string, number[]>
+  /** Same length as `months` when returned by the API (rolling or calendar year). */
+  txn_count_series?: number[]
 }
 
 export interface AnomalyItem {
