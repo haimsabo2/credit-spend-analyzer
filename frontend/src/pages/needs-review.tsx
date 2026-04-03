@@ -19,7 +19,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Loader2, Plus, Sparkles } from "lucide-react"
 import { useMonthStore } from "@/stores/use-month-store"
@@ -30,7 +29,6 @@ import {
   llmCategorizePending,
 } from "@/api/transactions"
 import { listCategories, createCategory } from "@/api/categories"
-import { probeRulesAvailable } from "@/api/probe"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import type { Transaction } from "@/api/types"
 import { ApiError } from "@/api/client"
@@ -86,7 +84,6 @@ export default function NeedsReviewPage() {
   const [search, setSearch] = useState("")
   const [filterLow, setFilterLow] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<Record<number, number>>({})
-  const [createRuleFor, setCreateRuleFor] = useState<Set<number>>(new Set())
   const [pendingOtherForRow, setPendingOtherForRow] = useState<number | null>(null)
   const [newCategoryName, setNewCategoryName] = useState("")
   const [aiDialogOpen, setAiDialogOpen] = useState(false)
@@ -105,12 +102,6 @@ export default function NeedsReviewPage() {
   const { data: categories = [] } = useQuery({
     queryKey: ["categories"],
     queryFn: listCategories,
-  })
-
-  const { data: rulesAvailable = true } = useQuery({
-    queryKey: ["probe-rules"],
-    queryFn: probeRulesAvailable,
-    staleTime: 5 * 60 * 1000,
   })
 
   const createCategoryMutation = useMutation({
@@ -144,17 +135,18 @@ export default function NeedsReviewPage() {
   })
 
   const categorizeMutation = useMutation({
-    mutationFn: ({ txnId, categoryId, createRule, pattern }: {
+    mutationFn: ({
+      txnId,
+      categoryId,
+      pattern,
+    }: {
       txnId: number
       categoryId: number
-      createRule: boolean
       pattern: string
     }) =>
       categorizeTransaction(txnId, {
         category_id: categoryId,
-        create_rule: createRule,
-        rule_match_type: "contains",
-        rule_pattern: pattern,
+        rule_pattern: pattern || undefined,
       }),
     onMutate: async (variables) => {
       await qc.cancelQueries({ queryKey: ["needs-review", month] })
@@ -165,20 +157,22 @@ export default function NeedsReviewPage() {
       )
       return { prev }
     },
-    onSuccess(_, variables) {
+    onSuccess(data) {
       qc.invalidateQueries({ queryKey: ["needs-review", month] })
       qc.invalidateQueries({ queryKey: ["summary", month] })
+      qc.invalidateQueries({ queryKey: ["transactions"] })
       setSelectedCategory((prev) => {
         const next = { ...prev }
-        delete next[variables.txnId]
+        delete next[data.transaction_id]
         return next
       })
-      setCreateRuleFor((prev) => {
-        const next = new Set(prev)
-        next.delete(variables.txnId)
-        return next
-      })
-      toast.success(t("review.successToast"))
+      if (data.backfill_count <= 0) {
+        toast.success(t("transactionsTable.categoryUpdated"))
+      } else {
+        toast.success(
+          t("transactionsTable.categoryPropagated", { count: data.backfill_count }),
+        )
+      }
     },
     onError(err, _variables, context) {
       if (context?.prev != null) {
@@ -235,13 +229,10 @@ export default function NeedsReviewPage() {
   const handleSave = (txn: Transaction) => {
     const catId = selectedCategory[txn.id]
     if (catId == null) return
-    const createRule = createRuleFor.has(txn.id)
-    const pattern = getRulePattern(txn)
     categorizeMutation.mutate({
       txnId: txn.id,
       categoryId: catId,
-      createRule,
-      pattern,
+      pattern: getRulePattern(txn),
     })
   }
 
@@ -384,7 +375,6 @@ export default function NeedsReviewPage() {
                 const isOtherMode = pendingOtherForRow === txn.id
                 const similarCount = descriptionCount[txn.description] ?? 1
                 const hasSimilar = similarCount > 1
-                const createRuleChecked = createRuleFor.has(txn.id)
 
                 return (
                   <TableRow key={txn.id} className={isSaving ? "opacity-60" : undefined}>
@@ -412,7 +402,8 @@ export default function NeedsReviewPage() {
                       {txn.reason_he ?? t("review.emptyValue")}
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex max-w-[min(100%,22rem)] flex-col gap-1">
+                        <div className="flex flex-wrap items-center gap-2">
                         <Select
                           value={isOtherMode ? OTHER_VALUE : (catId != null ? String(catId) : "")}
                           onValueChange={(v) => handleCategoryChange(txn.id, v)}
@@ -455,33 +446,6 @@ export default function NeedsReviewPage() {
                           </div>
                         )}
 
-                        {rulesAvailable && (
-                          <div className="flex items-center gap-1.5">
-                            <Checkbox
-                              id={`rule-${txn.id}`}
-                              checked={createRuleChecked}
-                              onCheckedChange={(checked) => {
-                                setCreateRuleFor((prev) => {
-                                  const next = new Set(prev)
-                                  if (checked) next.add(txn.id)
-                                  else next.delete(txn.id)
-                                  return next
-                                })
-                              }}
-                            />
-                            <label
-                              htmlFor={`rule-${txn.id}`}
-                              className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap"
-                            >
-                              {t("review.createRule")}
-                              {hasSimilar && createRuleChecked && (
-                                <span className="ms-1 text-primary">
-                                  ({t("review.willUpdateSimilar", { count: similarCount - 1 })})
-                                </span>
-                              )}
-                            </label>
-                          </div>
-                        )}
                         <Button
                           size="sm"
                           disabled={catId == null || isSaving}
@@ -493,6 +457,12 @@ export default function NeedsReviewPage() {
                             t("review.save")
                           )}
                         </Button>
+                        </div>
+                        {hasSimilar && (
+                          <p className="text-xs text-muted-foreground">
+                            {t("review.propagateHint", { count: similarCount })}
+                          </p>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

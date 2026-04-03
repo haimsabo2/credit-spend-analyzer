@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { TransactionRead } from "@/types/api"
 import { useCategories } from "@/hooks/use-categories"
@@ -10,13 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 
 interface Props {
@@ -27,37 +19,16 @@ export function CategoryCell({ transaction }: Props) {
   const { t } = useTranslation()
   const { data: categories } = useCategories()
   const categorize = useCategorize()
-  const [pendingCategoryId, setPendingCategoryId] = useState<number | null>(null)
-  const [createRule, setCreateRule] = useState(false)
-  const [open, setOpen] = useState(false)
 
   const currentValue = transaction.category_id != null ? String(transaction.category_id) : ""
 
-  function handleSelect(value: string) {
+  function handleValueChange(value: string) {
     const catId = Number(value)
-    setPendingCategoryId(catId)
-    setCreateRule(false)
-    setOpen(true)
-  }
-
-  function handleConfirm() {
-    if (pendingCategoryId == null) return
-    setOpen(false)
+    if (transaction.category_id === catId) return
     categorize.mutate({
       txnId: transaction.id,
-      body: {
-        category_id: pendingCategoryId,
-        create_rule: createRule,
-        rule_match_type: createRule ? "merchant_key" : undefined,
-        rule_pattern: createRule ? transaction.description : undefined,
-      },
+      body: { category_id: catId },
     })
-    setPendingCategoryId(null)
-  }
-
-  function handleCancel() {
-    setOpen(false)
-    setPendingCategoryId(null)
   }
 
   if (categorize.isPending) {
@@ -70,47 +41,19 @@ export function CategoryCell({ transaction }: Props) {
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <div>
-          <Select value={currentValue} onValueChange={handleSelect}>
-            <SelectTrigger size="sm" className="h-7 w-36 text-xs">
-              <SelectValue placeholder="Uncategorized" />
-            </SelectTrigger>
-            <SelectContent>
-              {categories?.map((cat) => (
-                <SelectItem key={cat.id} value={String(cat.id)}>
-                  {cat.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </PopoverTrigger>
-      <PopoverContent className="w-56 space-y-3 p-3" side="bottom" align="start">
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id={`rule-${transaction.id}`}
-            checked={createRule}
-            onCheckedChange={(v) => setCreateRule(v === true)}
-          />
-          <label
-            htmlFor={`rule-${transaction.id}`}
-            className="text-xs leading-tight text-muted-foreground"
-          >
-            {t("transactionsTable.createRuleFor")}{" "}
-            <span className="font-medium text-foreground">"{transaction.description}"</span>
-          </label>
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCancel}>
-            {t("common.cancel")}
-          </Button>
-          <Button size="sm" className="h-7 text-xs" onClick={handleConfirm}>
-            {t("common.apply")}
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div title={t("transactionsTable.categoryPropagateHint")}>
+      <Select value={currentValue} onValueChange={handleValueChange}>
+        <SelectTrigger size="sm" className="h-7 w-36 text-xs">
+          <SelectValue placeholder={t("transactionsTable.uncategorized")} />
+        </SelectTrigger>
+        <SelectContent>
+          {categories?.map((cat) => (
+            <SelectItem key={cat.id} value={String(cat.id)}>
+              {cat.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   )
 }

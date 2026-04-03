@@ -39,3 +39,17 @@ def next_month(month: str) -> str:
     d = date(year, mon, 28) + timedelta(days=4)
     d = d.replace(day=1)
     return f"{d.year:04d}-{d.month:02d}"
+
+
+def trailing_calendar_months_ending_at(end_month: str, n: int) -> list[str]:
+    """Return *n* consecutive calendar months ending at *end_month* (inclusive), oldest first."""
+    ey, em = int(end_month[:4]), int(end_month[5:7])
+    out: list[str] = []
+    for k in range(n - 1, -1, -1):
+        y, m = ey, em
+        m -= k
+        while m <= 0:
+            m += 12
+            y -= 1
+        out.append(f"{y:04d}-{m:02d}")
+    return out

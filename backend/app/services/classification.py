@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from ..models import ClassificationRule, Transaction
 
@@ -102,3 +102,50 @@ def apply_single_rule(session: Session, rule: ClassificationRule) -> int:
     if updated:
         session.commit()
     return updated
+
+
+def upsert_merchant_key_rule_and_propagate(
+    session: Session, pattern: str, category_id: int
+) -> tuple[ClassificationRule, int]:
+    """Deactivate any active merchant_key rules for this pattern, add one new rule, set category
+    and confidence=1.0 on every transaction whose trimmed description matches (all months).
+
+    Returns (new_rule, number_of_transactions_updated).
+    """
+    pat = pattern.strip()
+    if not pat:
+        raise ValueError("pattern must be non-empty")
+
+    stmt_conflicts = select(ClassificationRule).where(
+        ClassificationRule.match_type == "merchant_key",
+        ClassificationRule.active == True,  # noqa: E712
+        func.lower(ClassificationRule.pattern) == pat.lower(),
+    )
+    for r in session.exec(stmt_conflicts).all():
+        r.active = False
+        session.add(r)
+    session.flush()
+
+    new_rule = ClassificationRule(
+        pattern=pat,
+        match_type="merchant_key",
+        category_id=category_id,
+        priority=100,
+        active=True,
+    )
+    session.add(new_rule)
+    session.flush()
+    session.refresh(new_rule)
+
+    stmt_txn = select(Transaction).where(
+        func.lower(func.trim(Transaction.description)) == pat.lower()
+    )
+    txns = list(session.exec(stmt_txn).all())
+    for t in txns:
+        t.category_id = category_id
+        t.confidence = 1.0
+        t.rule_id_applied = new_rule.id
+        t.needs_review = False
+        session.add(t)
+
+    return new_rule, len(txns)

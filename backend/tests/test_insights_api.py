@@ -104,6 +104,7 @@ def test_trends_shape(seeded_client: TestClient):
     assert isinstance(data["txn_count_series"], list)
     assert len(data["txn_count_series"]) == len(data["months"])
     assert isinstance(data["category_series"], dict)
+    assert isinstance(data.get("category_monthly", []), list)
 
     for month_str in data["months"]:
         assert isinstance(month_str, str)
@@ -139,6 +140,16 @@ def test_trends_year_twelve_months(seeded_client: TestClient):
     idx = data["months"].index("2026-04")
     assert data["txn_count_series"][idx] > 0
 
+    cm = data["category_monthly"]
+    assert isinstance(cm, list)
+    assert len(cm) >= 1
+    for row in cm:
+        assert "category_id" in row
+        assert isinstance(row["category_name"], str)
+        assert len(row["amounts"]) == 12
+        assert isinstance(row["year_total"], (int, float))
+        assert abs(row["year_total"] - sum(row["amounts"])) < 0.02
+
 
 def test_trends_year_all_zeros(client: TestClient):
     r = client.get("/api/insights/trends", params={"year": 1999})
@@ -147,6 +158,124 @@ def test_trends_year_all_zeros(client: TestClient):
     assert len(data["months"]) == 12
     assert all(x == 0 for x in data["total_spend_series"])
     assert data["txn_count_series"] == [0] * 12
+    assert data["category_monthly"] == []
+
+
+def test_trends_trailing_calendar_months_shape_any_db(client: TestClient):
+    """With no uploads, months is empty; with data, always 12 trailing slots."""
+    r = client.get("/api/insights/trends", params={"trailing_calendar_months": 12})
+    assert r.status_code == 200
+    data = r.json()
+    n = len(data["months"])
+    assert n in (0, 12)
+    assert len(data["total_spend_series"]) == n
+    assert len(data["txn_count_series"]) == n
+    if n == 0:
+        assert data["category_monthly"] == []
+    else:
+        for row in data["category_monthly"]:
+            assert len(row["amounts"]) == n
+
+
+def test_trends_trailing_calendar_months_seeded(seeded_client: TestClient):
+    """Trailing window ends at latest upload month; includes category_monthly like calendar year."""
+    r = seeded_client.get("/api/insights/trends", params={"trailing_calendar_months": 12})
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["months"]) == 12
+    assert data["months"][-1] == "2026-04"
+    assert data["months"][0] == "2025-05"
+    assert len(data["total_spend_series"]) == 12
+    assert len(data["txn_count_series"]) == 12
+    idx = data["months"].index("2026-04")
+    assert data["txn_count_series"][idx] > 0
+
+    cm = data["category_monthly"]
+    assert isinstance(cm, list)
+    assert len(cm) >= 1
+    for row in cm:
+        assert len(row["amounts"]) == 12
+        assert abs(row["year_total"] - sum(row["amounts"])) < 0.02
+
+
+# ── Category year merchants (drill-down) ──────────────────────────────────
+
+
+def test_category_year_merchants_requires_year_or_trailing(client: TestClient):
+    r = client.get("/api/insights/category-year-merchants")
+    assert r.status_code == 422
+
+
+def test_category_year_merchants_empty_year(client: TestClient):
+    r = client.get("/api/insights/category-year-merchants", params={"year": 1999})
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["months"]) == 12
+    assert data["months"][0] == "1999-01"
+    assert data["merchants"] == []
+
+
+def test_category_year_merchants_shape_uncategorized(client: TestClient):
+    """Omit category_id => uncategorized only."""
+    r = client.get("/api/insights/category-year-merchants", params={"year": 2026})
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["months"]) == 12
+    assert isinstance(data["merchants"], list)
+    for m in data["merchants"]:
+        assert isinstance(m["merchant_key"], str)
+        assert len(m["amounts"]) == 12
+        assert isinstance(m["amounts"][0], (int, float))
+
+
+def test_category_year_merchants_totals_match_category_monthly(seeded_client: TestClient):
+    """Sum of merchant amounts per month equals category_monthly for that category."""
+    tr = seeded_client.get("/api/insights/trends", params={"year": 2026})
+    assert tr.status_code == 200
+    trends = tr.json()
+    cm = trends.get("category_monthly") or []
+    if not cm:
+        pytest.skip("No category_monthly in seeded data")
+    row = cm[0]
+    cid = row["category_id"]
+    params = {"year": 2026}
+    if cid is not None:
+        params["category_id"] = cid
+    mr = seeded_client.get("/api/insights/category-year-merchants", params=params)
+    assert mr.status_code == 200
+    breakdown = mr.json()
+    assert len(breakdown["months"]) == 12
+    by_month_merch = [0.0] * 12
+    for merch in breakdown["merchants"]:
+        for i, v in enumerate(merch["amounts"]):
+            by_month_merch[i] += float(v)
+    for i in range(12):
+        assert abs(by_month_merch[i] - float(row["amounts"][i])) < 0.02
+
+
+def test_category_year_merchants_trailing_matches_trends(seeded_client: TestClient):
+    tr = seeded_client.get("/api/insights/trends", params={"trailing_calendar_months": 12})
+    assert tr.status_code == 200
+    trends = tr.json()
+    cm = trends.get("category_monthly") or []
+    if not cm:
+        pytest.skip("No category_monthly in seeded data")
+    row = cm[0]
+    cid = row["category_id"]
+    params: dict = {"trailing_calendar_months": 12}
+    if cid is not None:
+        params["category_id"] = cid
+    mr = seeded_client.get("/api/insights/category-year-merchants", params=params)
+    assert mr.status_code == 200
+    breakdown = mr.json()
+    assert breakdown["months"] == trends["months"]
+    assert len(breakdown["months"]) == 12
+    by_month_merch = [0.0] * 12
+    for merch in breakdown["merchants"]:
+        for i, v in enumerate(merch["amounts"]):
+            by_month_merch[i] += float(v)
+    for i in range(12):
+        assert abs(by_month_merch[i] - float(row["amounts"][i])) < 0.02
 
 
 # ── Anomalies ─────────────────────────────────────────────────────────────

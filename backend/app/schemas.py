@@ -168,11 +168,35 @@ class SummaryResponse(SQLModel):
     top_merchants: List[MerchantSpend]
 
 
+class CategoryMonthlyRow(SQLModel):
+    """Per-category spend per calendar slot; amounts align with TrendsResponse.months."""
+
+    category_id: Optional[int] = None
+    category_name: str
+    amounts: List[float]
+    year_total: float
+
+
 class TrendsResponse(SQLModel):
     months: List[str]
     total_spend_series: List[float]
     category_series: Dict[str, List[float]]
     txn_count_series: List[int] = Field(default_factory=list)
+    category_monthly: List[CategoryMonthlyRow] = Field(default_factory=list)
+
+
+class MerchantMonthlySeries(SQLModel):
+    """Spend per calendar month for one merchant (description) within a category."""
+
+    merchant_key: str
+    amounts: List[float]
+
+
+class CategoryYearMerchantsResponse(SQLModel):
+    """Aligned with calendar year months; merchants sorted ascending by year total (stack bottom to top)."""
+
+    months: List[str]
+    merchants: List[MerchantMonthlySeries]
 
 
 class AnomalyItem(SQLModel):

@@ -81,6 +81,7 @@ def _get_first_category_id(client: TestClient) -> int:
 
 
 def test_categorize_no_rule_response_shape(seeded_client: TestClient):
+    """Manual categorize always upserts a merchant_key rule and propagates to matching rows."""
     txn_id = _get_first_txn_id(seeded_client)
     cat_id = _get_first_category_id(seeded_client)
 
@@ -92,9 +93,10 @@ def test_categorize_no_rule_response_shape(seeded_client: TestClient):
     data = r.json()
     assert data["transaction_id"] == txn_id
     assert data["category_id"] == cat_id
-    assert data["rule_created"] is False
-    assert data["rule_id"] is None
-    assert data["backfill_count"] == 0
+    assert data["rule_created"] is True
+    assert isinstance(data["rule_id"], int)
+    assert isinstance(data["backfill_count"], int)
+    assert data["backfill_count"] >= 1
 
 
 def test_categorize_sets_confidence_to_manual(seeded_client: TestClient):
@@ -140,42 +142,33 @@ def test_categorize_with_rule_creation_shape(seeded_client: TestClient):
     assert isinstance(data["backfill_count"], int)
 
 
-# ── Duplicate rule prevention ─────────────────────────────────────────────
+# ── Repeated categorize for same merchant (description) ───────────────────
 
 
-def test_duplicate_rule_not_created(seeded_client: TestClient):
-    txns = seeded_client.get("/api/transactions", params={"limit": 2}).json()
-    assert len(txns) >= 2
-    txn1, txn2 = txns[0], txns[1]
+def test_second_categorize_same_description_new_rule_id(seeded_client: TestClient):
+    """Each save creates a new active merchant_key rule row; prior same-pattern rules are deactivated."""
+    all_txns = seeded_client.get("/api/transactions", params={"limit": 500}).json()
+    by_desc: dict[str, list] = {}
+    for t in all_txns:
+        by_desc.setdefault(t["description"], []).append(t)
+    pair = next((v for v in by_desc.values() if len(v) >= 2), None)
+    if pair is None:
+        pytest.skip("Need two transactions with identical description")
+
     cat_id = _get_first_category_id(seeded_client)
+    a, b = pair[0], pair[1]
 
-    r1 = seeded_client.post(
-        f"/api/transactions/{txn1['id']}/categorize",
-        json={
-            "category_id": cat_id,
-            "create_rule": True,
-            "rule_match_type": "contains",
-            "rule_pattern": "__dedup_test_pattern__",
-        },
-    )
-    assert r1.status_code == 200
-    d1 = r1.json()
+    d1 = seeded_client.post(
+        f"/api/transactions/{a['id']}/categorize",
+        json={"category_id": cat_id},
+    ).json()
+    d2 = seeded_client.post(
+        f"/api/transactions/{b['id']}/categorize",
+        json={"category_id": cat_id},
+    ).json()
     assert d1["rule_created"] is True
-    first_rule_id = d1["rule_id"]
-
-    r2 = seeded_client.post(
-        f"/api/transactions/{txn2['id']}/categorize",
-        json={
-            "category_id": cat_id,
-            "create_rule": True,
-            "rule_match_type": "contains",
-            "rule_pattern": "__dedup_test_pattern__",
-        },
-    )
-    assert r2.status_code == 200
-    d2 = r2.json()
-    assert d2["rule_created"] is False
-    assert d2["rule_id"] == first_rule_id
+    assert d2["rule_created"] is True
+    assert d2["rule_id"] != d1["rule_id"]
 
 
 # ── Backfill ──────────────────────────────────────────────────────────────
@@ -203,15 +196,15 @@ def test_backfill_categorizes_matching_transactions(seeded_client: TestClient):
     cat_id = _get_first_category_id(seeded_client)
     r = seeded_client.post(
         f"/api/transactions/{pair[0]['id']}/categorize",
-        json={"category_id": cat_id, "create_rule": True},
+        json={"category_id": cat_id},
     )
     assert r.status_code == 200
-    assert r.json()["backfill_count"] >= 1
+    assert r.json()["backfill_count"] >= 2
 
     r2 = seeded_client.get("/api/transactions", params={"limit": 500})
     other = next(t for t in r2.json() if t["id"] == pair[1]["id"])
     assert other["category_id"] == cat_id
-    assert other["confidence"] == 0.9
+    assert other["confidence"] == 1.0
 
 
 # ── Needs-review filter ──────────────────────────────────────────────────

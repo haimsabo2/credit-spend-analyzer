@@ -14,8 +14,12 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  LabelList,
 } from "recharts"
 import { Upload } from "lucide-react"
+import { CategoryYearCarousel } from "@/components/dashboard/category-year-carousel"
+import { CategoryYearDrilldownDialog } from "@/components/dashboard/category-year-drilldown-dialog"
+import { CategoryYearOverviewGrouped } from "@/components/dashboard/category-year-overview-grouped"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ChartCard } from "@/components/dashboard/chart-card"
 import { Button } from "@/components/ui/button"
@@ -35,9 +39,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { SummaryResponse } from "@/api/types"
+import type { CategoryMonthlyRow, SummaryResponse } from "@/api/types"
 import { ApiError } from "@/api/client"
-import { getSummary, getYearOverview } from "@/api/insights"
+import { getSummary, getTrailingOverview, getYearOverview } from "@/api/insights"
 import { getNeedsReview } from "@/api/transactions"
 import { listTransactions } from "@/api/transactions"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
@@ -65,6 +69,9 @@ const CHART_COLORS = [
 ]
 
 const MIN_DASHBOARD_YEAR = 2020
+
+/** Select value for trailing 12 calendar months (not a calendar year). */
+const PERIOD_TRAILING12 = "__trailing12__"
 
 function yearSelectOptions(): number[] {
   const cy = new Date().getFullYear()
@@ -99,6 +106,10 @@ function formatSignedDelta(delta: number, currency: string): string {
   return `${sign}${formatCurrency(Math.abs(delta), currency)}`
 }
 
+function categoryRowSelectValue(row: CategoryMonthlyRow): string {
+  return row.category_id == null ? "__uncat__" : String(row.category_id)
+}
+
 export default function DashboardPage() {
   const { t } = useTranslation()
   const yearOptions = useMemo(() => yearSelectOptions(), [])
@@ -106,22 +117,24 @@ export default function DashboardPage() {
   const { month: storeMonth, setMonth: setStoreMonth } = useMonthStore()
   const selectedMonth = storeMonth
 
-  const [selectedYear, setSelectedYear] = useState(() => {
+  const [periodSelect, setPeriodSelect] = useState<string>(() => {
     const y = parseInt(storeMonth.slice(0, 4), 10)
-    return Number.isFinite(y) ? y : new Date().getFullYear()
+    return Number.isFinite(y) ? String(y) : String(new Date().getFullYear())
   })
 
-  const monthsInYear = useMemo(
-    () =>
-      Array.from({ length: 12 }, (_, i) => `${selectedYear}-${String(i + 1).padStart(2, "0")}`),
-    [selectedYear],
-  )
+  const isTrailing12 = periodSelect === PERIOD_TRAILING12
+  const selectedCalendarYear = isTrailing12 ? null : parseInt(periodSelect, 10)
+  const calendarYearValid =
+    selectedCalendarYear != null && Number.isFinite(selectedCalendarYear)
 
   const handlePickMonth = useCallback(
     (ym: string) => {
       setStoreMonth(ym)
-      const y = parseInt(ym.slice(0, 4), 10)
-      if (Number.isFinite(y)) setSelectedYear(y)
+      setPeriodSelect((prev) => {
+        if (prev === PERIOD_TRAILING12) return prev
+        const y = parseInt(ym.slice(0, 4), 10)
+        return Number.isFinite(y) ? String(y) : prev
+      })
       requestAnimationFrame(() => {
         document.getElementById("month-detail")?.scrollIntoView({ behavior: "smooth", block: "start" })
       })
@@ -130,10 +143,11 @@ export default function DashboardPage() {
   )
 
   useEffect(() => {
+    if (periodSelect === PERIOD_TRAILING12) return
     const y = parseInt(selectedMonth.slice(0, 4), 10)
     if (!Number.isFinite(y)) return
-    setSelectedYear((prev) => (prev === y ? prev : y))
-  }, [selectedMonth])
+    setPeriodSelect((prev) => (prev === PERIOD_TRAILING12 ? prev : String(y)))
+  }, [selectedMonth, periodSelect])
 
   const { data: summary, isLoading: summaryLoading, error: summaryError } = useQuery({
     queryKey: ["summary", selectedMonth],
@@ -157,9 +171,34 @@ export default function DashboardPage() {
   })
 
   const { data: yearTrends, isLoading: yearTrendsLoading } = useQuery({
-    queryKey: ["trends", "year", selectedYear],
-    queryFn: () => getYearOverview(selectedYear),
+    queryKey: isTrailing12
+      ? (["trends", "trailing", 12] as const)
+      : (["trends", "year", selectedCalendarYear] as const),
+    queryFn: () =>
+      isTrailing12
+        ? getTrailingOverview(12)
+        : getYearOverview(selectedCalendarYear!),
+    enabled: isTrailing12 || calendarYearValid,
   })
+
+  const monthsInYear = useMemo(() => {
+    if (isTrailing12) {
+      return yearTrends?.months?.length ? yearTrends.months : []
+    }
+    const y = selectedCalendarYear
+    if (y == null || !Number.isFinite(y)) return []
+    return Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, "0")}`)
+  }, [isTrailing12, yearTrends?.months, selectedCalendarYear])
+
+  useEffect(() => {
+    if (!isTrailing12 || !yearTrends?.months?.length) return
+    if (yearTrends.months.includes(selectedMonth)) return
+    setStoreMonth(yearTrends.months[yearTrends.months.length - 1]!)
+  }, [isTrailing12, yearTrends?.months, selectedMonth, setStoreMonth])
+
+  const categoryMonthlyRows = yearTrends?.category_monthly
+
+  const [categoryDrilldownRow, setCategoryDrilldownRow] = useState<CategoryMonthlyRow | null>(null)
 
   const { data: transactions } = useQuery({
     queryKey: ["transactions", selectedMonth],
@@ -199,6 +238,18 @@ export default function DashboardPage() {
       count: yearTrends.txn_count_series?.[i] ?? 0,
     }))
   }, [yearTrends])
+
+  /** Nice Y max with headroom so bars use more vertical space and top labels fit. */
+  const annualChartYMax = useMemo(() => {
+    const max = Math.max(0, ...annualChartData.map((r) => r.total))
+    if (max <= 0) return 1
+    const padded = max * 1.2
+    const magnitude = 10 ** Math.floor(Math.log10(padded))
+    const normalized = padded / magnitude
+    const nice =
+      normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+    return nice * magnitude
+  }, [annualChartData])
 
   const categoriesCount = effectiveSummary?.spend_by_category?.filter((c) => c.amount > 0).length ?? 0
   const totalTransactions = transactions?.length ?? 0
@@ -268,17 +319,24 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">{t("dashboard.year")}:</span>
           <Select
-            value={String(selectedYear)}
+            value={periodSelect}
             onValueChange={(v) => {
+              if (v === PERIOD_TRAILING12) {
+                setPeriodSelect(PERIOD_TRAILING12)
+                return
+              }
               const y = parseInt(v, 10)
-              setSelectedYear(y)
-              setStoreMonth(`${y}-01`)
+              if (Number.isFinite(y)) {
+                setPeriodSelect(v)
+                setStoreMonth(`${y}-01`)
+              }
             }}
           >
-            <SelectTrigger className="w-[100px]">
+            <SelectTrigger className="w-[min(100%,11rem)] min-w-[9.5rem]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={PERIOD_TRAILING12}>{t("dashboard.trailing12Months")}</SelectItem>
               {yearOptions.map((y) => (
                 <SelectItem key={y} value={String(y)}>
                   {y}
@@ -303,15 +361,24 @@ export default function DashboardPage() {
         <>
           <ChartCard title={t("dashboard.annualOverview")}>
             {yearTrendsLoading ? (
-              <Skeleton className="h-[220px] w-full" />
+              <Skeleton className="h-[380px] w-full" />
             ) : annualChartData.length > 0 ? (
               <div className="space-y-4">
                 <p className="text-muted-foreground text-xs">{t("dashboard.clickMonthHint")}</p>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={annualChartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                <ResponsiveContainer width="100%" height={360}>
+                  <BarChart
+                    data={annualChartData}
+                    margin={{ top: 32, right: 12, left: 4, bottom: 8 }}
+                    barCategoryGap="18%"
+                  >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} angle={-35} textAnchor="end" height={56} />
-                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${currencySymbol}${v}`} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-35} textAnchor="end" height={56} />
+                    <YAxis
+                      domain={[0, annualChartYMax]}
+                      tick={{ fontSize: 11 }}
+                      width={52}
+                      tickFormatter={(v) => `${currencySymbol}${v}`}
+                    />
                     <Tooltip
                       formatter={(v: number | undefined, _n, p) => {
                         const payload = p?.payload as { count?: number } | undefined
@@ -325,12 +392,40 @@ export default function DashboardPage() {
                       dataKey="total"
                       fill="var(--color-chart-1)"
                       radius={[4, 4, 0, 0]}
+                      maxBarSize={56}
                       cursor="pointer"
                       onClick={(e: { payload?: { ym?: string } }) => {
                         const ym = e?.payload?.ym
                         if (ym) handlePickMonth(ym)
                       }}
-                    />
+                    >
+                      <LabelList
+                        dataKey="total"
+                        position="top"
+                        content={(props) => {
+                          const { x, y, width, value } = props as {
+                            x?: number
+                            y?: number
+                            width?: number
+                            value?: number
+                          }
+                          if (x == null || y == null || width == null) return null
+                          const n = typeof value === "number" ? value : Number(value)
+                          if (!Number.isFinite(n) || n <= 0) return null
+                          return (
+                            <text
+                              x={x + width / 2}
+                              y={y - 6}
+                              fill="hsl(var(--muted-foreground))"
+                              fontSize={11}
+                              textAnchor="middle"
+                            >
+                              {formatCurrency(n, currency)}
+                            </text>
+                          )
+                        }}
+                      />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
                 <div className="rounded-md border">
@@ -368,6 +463,112 @@ export default function DashboardPage() {
               </div>
             ) : (
               <p className="text-muted-foreground flex h-[200px] items-center justify-center text-sm">—</p>
+            )}
+          </ChartCard>
+
+          <ChartCard title={t("dashboard.annualByCategory")}>
+            {yearTrendsLoading ? (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-6">
+                  <Skeleton className="h-[300px] w-full rounded-md" />
+                  <Skeleton className="h-[300px] w-full rounded-md" />
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  {Array.from({ length: 3 }, (_, i) => (
+                    <Skeleton key={i} className="h-[248px] w-full rounded-md" />
+                  ))}
+                </div>
+              </div>
+            ) : (categoryMonthlyRows?.length ?? 0) === 0 ? (
+              <p className="text-muted-foreground flex h-[120px] items-center justify-center text-sm">—</p>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-muted-foreground mb-2 text-sm font-medium">
+                    {t("dashboard.categoryYearOverviewHeading")}
+                  </h3>
+                  <CategoryYearOverviewGrouped
+                    rows={categoryMonthlyRows ?? []}
+                    monthLabels={yearTrends?.months ?? []}
+                    currency={currency}
+                    currencySymbol={currencySymbol}
+                  />
+                </div>
+                <div>
+                  <h3 className="text-muted-foreground mb-2 text-sm font-medium">
+                    {t("dashboard.categoryCarouselHeading")}
+                  </h3>
+                  <CategoryYearCarousel
+                    rows={categoryMonthlyRows ?? []}
+                    monthLabels={yearTrends?.months ?? []}
+                    currency={currency}
+                    currencySymbol={currencySymbol}
+                    onPanelClick={setCategoryDrilldownRow}
+                  />
+                </div>
+                <CategoryYearDrilldownDialog
+                  open={categoryDrilldownRow != null}
+                  onOpenChange={(open) => {
+                    if (!open) setCategoryDrilldownRow(null)
+                  }}
+                  merchantsScope={
+                    isTrailing12
+                      ? { trailingCalendarMonths: 12 }
+                      : { year: selectedCalendarYear! }
+                  }
+                  periodLabel={
+                    isTrailing12
+                      ? t("dashboard.trailing12Months")
+                      : String(selectedCalendarYear)
+                  }
+                  categoryId={categoryDrilldownRow?.category_id ?? null}
+                  categoryName={categoryDrilldownRow?.category_name ?? ""}
+                  currency={currency}
+                  currencySymbol={currencySymbol}
+                />
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="bg-background sticky start-0 z-10 min-w-[9rem] shadow-[2px_0_4px_-2px_hsl(var(--border))]">
+                          {t("dashboard.categoryYearTableCategory")}
+                        </TableHead>
+                        {(yearTrends?.months ?? []).map((ym) => (
+                          <TableHead
+                            key={ym}
+                            className="min-w-[4.5rem] text-end text-xs font-normal whitespace-nowrap"
+                          >
+                            {formatMonthShort(ym)}
+                          </TableHead>
+                        ))}
+                        <TableHead className="min-w-[5.5rem] text-end">
+                          {t("dashboard.categoryYearTableTotal")}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(categoryMonthlyRows ?? []).map((row) => (
+                        <TableRow key={categoryRowSelectValue(row)}>
+                          <TableCell className="bg-background sticky start-0 z-10 font-medium shadow-[2px_0_4px_-2px_hsl(var(--border))]">
+                            {row.category_name}
+                          </TableCell>
+                          {row.amounts.map((amt, i) => (
+                            <TableCell
+                              key={yearTrends?.months[i] ?? i}
+                              className="text-end tabular-nums text-sm"
+                            >
+                              {amt > 0 ? formatCurrency(amt, currency) : "—"}
+                            </TableCell>
+                          ))}
+                          <TableCell className="text-end tabular-nums font-medium">
+                            {formatCurrency(row.year_total, currency)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             )}
           </ChartCard>
 

@@ -53,12 +53,31 @@ export interface SummaryResponse {
   top_merchants: { merchant_key: string; display_name: string; amount: number; txn_count: number }[]
 }
 
+export interface CategoryMonthlyRow {
+  category_id: number | null
+  category_name: string
+  amounts: number[]
+  year_total: number
+}
+
 export interface TrendsResponse {
   months: string[]
   total_spend_series: number[]
   category_series: Record<string, number[]>
   /** Same length as `months` when returned by the API (rolling or calendar year). */
   txn_count_series?: number[]
+  /** Filled for calendar `year` requests: every category with spend in that year. */
+  category_monthly?: CategoryMonthlyRow[]
+}
+
+export interface MerchantMonthlySeries {
+  merchant_key: string
+  amounts: number[]
+}
+
+export interface CategoryYearMerchantsResponse {
+  months: string[]
+  merchants: MerchantMonthlySeries[]
 }
 
 export interface UploadRead {

@@ -7,7 +7,7 @@ from sqlalchemy import and_, or_
 from sqlmodel import Session, func, select
 
 from ..dependencies import SessionDep
-from ..models import ClassificationRule, Transaction, Upload
+from ..models import Transaction, Upload
 from ..schemas import (
     AutoCategorizeChunkResponse,
     AutoCategorizeSummary,
@@ -24,7 +24,7 @@ from ..services.batch_categorize import (
     llm_categorize_transactions,
 )
 from ..services.spend_pattern import ALLOWED_SPEND_PATTERNS
-from ..services.classification import apply_single_rule
+from ..services.classification import upsert_merchant_key_rule_and_propagate
 
 logger = logging.getLogger(__name__)
 
@@ -153,48 +153,29 @@ def categorize_transaction(
     txn.confidence = 1.0
     txn.needs_review = False
     session.add(txn)
+    session.flush()
 
-    rule_created = False
-    rule_id = None
-    backfill_count = 0
+    pattern = (body.rule_pattern or txn.description or "").strip()
+    if not pattern:
+        session.commit()
+        return CategorizeResponse(
+            transaction_id=txn.id,
+            category_id=body.category_id,
+            rule_created=False,
+            rule_id=None,
+            backfill_count=0,
+        )
 
-    if body.create_rule:
-        match_type = body.rule_match_type or "merchant_key"
-        pattern = body.rule_pattern or txn.description
-
-        existing_rule = session.exec(
-            select(ClassificationRule).where(
-                func.lower(ClassificationRule.pattern) == pattern.lower(),
-                ClassificationRule.match_type == match_type,
-                ClassificationRule.category_id == body.category_id,
-            )
-        ).first()
-
-        if existing_rule:
-            rule_id = existing_rule.id
-        else:
-            new_rule = ClassificationRule(
-                pattern=pattern,
-                match_type=match_type,
-                category_id=body.category_id,
-                priority=100,
-                active=True,
-            )
-            session.add(new_rule)
-            session.commit()
-            session.refresh(new_rule)
-            rule_id = new_rule.id
-            rule_created = True
-
-            backfill_count = apply_single_rule(session, new_rule)
-
+    new_rule, backfill_count = upsert_merchant_key_rule_and_propagate(
+        session, pattern, body.category_id
+    )
     session.commit()
 
     return CategorizeResponse(
         transaction_id=txn.id,
         category_id=body.category_id,
-        rule_created=rule_created,
-        rule_id=rule_id,
+        rule_created=True,
+        rule_id=new_rule.id,
         backfill_count=backfill_count,
     )
 

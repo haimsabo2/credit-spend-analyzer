@@ -15,12 +15,10 @@ export const needsReview = getNeedsReview
 export async function updateCategory(
   transactionId: number,
   categoryId: number,
-  options?: { createRule?: boolean; rulePattern?: string; ruleMatchType?: string },
+  options?: { rulePattern?: string },
 ): Promise<CategorizeResponse> {
   return categorizeTransaction(transactionId, {
     category_id: categoryId,
-    create_rule: options?.createRule ?? false,
-    rule_match_type: options?.ruleMatchType ?? "contains",
     rule_pattern: options?.rulePattern ?? undefined,
   })
 }

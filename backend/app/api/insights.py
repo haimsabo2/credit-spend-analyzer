@@ -2,21 +2,28 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
 from ..dependencies import SessionDep
 from ..schemas import (
     AnomalyItem,
     CardSpend,
+    CategoryMonthlyRow,
     CategorySpend,
+    CategoryYearMerchantsResponse,
+    MerchantMonthlySeries,
     MerchantSpend,
     SummaryResponse,
     TrendsResponse,
 )
 from ..utils import prior_months as _prior_months
+from ..utils import trailing_calendar_months_ending_at
 
 router = APIRouter()
+
+_TOP_MERCHANTS_YEAR_BREAKDOWN = 14
+_OTHER_MERCHANT_KEY = "Other"
 
 
 def _category_series_for_months(session, month_labels: list[str]) -> dict[str, list[float]]:
@@ -56,6 +63,116 @@ def _category_series_for_months(session, month_labels: list[str]) -> dict[str, l
     for cid in top_cat_ids:
         category_series[str(cid)] = [lookup.get((m, cid), 0.0) for m in month_labels]
     return category_series
+
+
+def _category_monthly_full(session, month_labels: list[str]) -> list[CategoryMonthlyRow]:
+    """All categories with any spend in the window; 12 (or len(months)) amounts per row."""
+    if not month_labels:
+        return []
+    months_list = ",".join(f"'{m}'" for m in month_labels)
+    rows = session.execute(
+        text(f"""
+            SELECT u.month,
+                   t.category_id,
+                   COALESCE(c.name, 'Uncategorized') AS category_name,
+                   SUM(t.amount) AS total
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN category c ON t.category_id = c.id
+            WHERE  u.month IN ({months_list})
+            GROUP  BY u.month, t.category_id, category_name
+        """),
+    ).all()
+    if not rows:
+        return []
+
+    cat_names: dict[Optional[int], str] = {}
+    lookup: dict[tuple[str, Optional[int]], float] = {}
+    for r in rows:
+        cid = r.category_id
+        cat_names[cid] = r.category_name
+        lookup[(r.month, cid)] = float(r.total)
+
+    out: list[CategoryMonthlyRow] = []
+    for cid in cat_names:
+        amounts = [lookup.get((m, cid), 0.0) for m in month_labels]
+        year_total = sum(amounts)
+        out.append(
+            CategoryMonthlyRow(
+                category_id=cid,
+                category_name=cat_names[cid],
+                amounts=amounts,
+                year_total=year_total,
+            ),
+        )
+    out.sort(key=lambda row: row.year_total, reverse=True)
+    return out
+
+
+def _category_year_merchant_breakdown(
+    session,
+    month_labels: list[str],
+    category_id: Optional[int],
+) -> CategoryYearMerchantsResponse:
+    """Per-merchant monthly totals for one category in a calendar year; top-N + Other, stack order ASC by year total."""
+    if not month_labels:
+        return CategoryYearMerchantsResponse(months=[], merchants=[])
+
+    months_list = ",".join(f"'{m}'" for m in month_labels)
+    if category_id is None:
+        where_cat = "t.category_id IS NULL"
+        params: dict = {}
+    else:
+        where_cat = "t.category_id = :cid"
+        params = {"cid": category_id}
+
+    rows = session.execute(
+        text(f"""
+            SELECT u.month,
+                   t.description AS merchant_key,
+                   SUM(t.amount) AS total
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  u.month IN ({months_list})
+              AND  {where_cat}
+            GROUP  BY u.month, t.description
+        """),
+        params,
+    ).all()
+
+    if not rows:
+        return CategoryYearMerchantsResponse(months=month_labels, merchants=[])
+
+    per_merchant: dict[str, list[float]] = {}
+    lookup: dict[tuple[str, str], float] = {}
+    for r in rows:
+        mk = (r.merchant_key or "").strip() or "(no description)"
+        lookup[(r.month, mk)] = float(r.total)
+        if mk not in per_merchant:
+            per_merchant[mk] = [0.0] * len(month_labels)
+
+    for mk in list(per_merchant.keys()):
+        per_merchant[mk] = [lookup.get((m, mk), 0.0) for m in month_labels]
+
+    totals = {mk: sum(amts) for mk, amts in per_merchant.items()}
+    sorted_by_total_desc = sorted(totals.keys(), key=lambda k: totals[k], reverse=True)
+    top_keys = sorted_by_total_desc[:_TOP_MERCHANTS_YEAR_BREAKDOWN]
+    tail_keys = sorted_by_total_desc[_TOP_MERCHANTS_YEAR_BREAKDOWN:]
+
+    merged: dict[str, list[float]] = {k: per_merchant[k][:] for k in top_keys}
+    if tail_keys:
+        other_amt = [0.0] * len(month_labels)
+        for tk in tail_keys:
+            for i, v in enumerate(per_merchant[tk]):
+                other_amt[i] += v
+        merged[_OTHER_MERCHANT_KEY] = other_amt
+
+    # Stack bottom = smallest year total, top = largest (ascending sort)
+    keys_for_response = sorted(merged.keys(), key=lambda k: sum(merged[k]))
+    merchants_out = [
+        MerchantMonthlySeries(merchant_key=k, amounts=merged[k]) for k in keys_for_response
+    ]
+    return CategoryYearMerchantsResponse(months=month_labels, merchants=merchants_out)
 
 
 # ── GET /api/insights/summary ──────────────────────────────────────────────
@@ -149,37 +266,70 @@ def get_summary(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-\d
 # ── GET /api/insights/trends ──────────────────────────────────────────────
 
 
+def _trends_for_month_labels(session, month_labels: list[str]) -> TrendsResponse:
+    if not month_labels:
+        return TrendsResponse(
+            months=[],
+            total_spend_series=[],
+            category_series={},
+            txn_count_series=[],
+            category_monthly=[],
+        )
+    start_m, end_m = month_labels[0], month_labels[-1]
+    rows = session.execute(
+        text("""
+            SELECT u.month,
+                   COALESCE(SUM(t.amount), 0) AS total,
+                   COUNT(*) AS txn_count
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  u.month >= :start_m AND u.month <= :end_m
+            GROUP  BY u.month
+        """),
+        {"start_m": start_m, "end_m": end_m},
+    ).all()
+    lookup = {r.month: (float(r.total), int(r.txn_count)) for r in rows}
+    total_spend_series = [lookup.get(m, (0.0, 0))[0] for m in month_labels]
+    txn_count_series = [lookup.get(m, (0.0, 0))[1] for m in month_labels]
+    category_series = _category_series_for_months(session, month_labels)
+    category_monthly = _category_monthly_full(session, month_labels)
+    return TrendsResponse(
+        months=month_labels,
+        total_spend_series=total_spend_series,
+        category_series=category_series,
+        txn_count_series=txn_count_series,
+        category_monthly=category_monthly,
+    )
+
+
 @router.get("/trends", response_model=TrendsResponse)
 def get_trends(
     session: SessionDep,
     months: int = Query(12, ge=1, le=60),
     year: Optional[int] = Query(None, ge=1990, le=2100),
+    trailing_calendar_months: Optional[int] = Query(
+        None,
+        ge=1,
+        le=24,
+        description="Trailing N calendar months ending at MAX(upload.month); ignores year and months",
+    ),
 ):
+    if trailing_calendar_months is not None:
+        max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
+        if not max_row or max_row.m is None:
+            return TrendsResponse(
+                months=[],
+                total_spend_series=[],
+                category_series={},
+                txn_count_series=[],
+                category_monthly=[],
+            )
+        month_labels = trailing_calendar_months_ending_at(max_row.m, trailing_calendar_months)
+        return _trends_for_month_labels(session, month_labels)
+
     if year is not None:
         month_labels = [f"{year}-{m:02d}" for m in range(1, 13)]
-        start_m, end_m = month_labels[0], month_labels[-1]
-        rows = session.execute(
-            text("""
-                SELECT u.month,
-                       COALESCE(SUM(t.amount), 0) AS total,
-                       COUNT(*) AS txn_count
-                FROM   "transaction" t
-                JOIN   upload u ON t.upload_id = u.id
-                WHERE  u.month >= :start_m AND u.month <= :end_m
-                GROUP  BY u.month
-            """),
-            {"start_m": start_m, "end_m": end_m},
-        ).all()
-        lookup = {r.month: (float(r.total), int(r.txn_count)) for r in rows}
-        total_spend_series = [lookup.get(m, (0.0, 0))[0] for m in month_labels]
-        txn_count_series = [lookup.get(m, (0.0, 0))[1] for m in month_labels]
-        category_series = _category_series_for_months(session, month_labels)
-        return TrendsResponse(
-            months=month_labels,
-            total_spend_series=total_spend_series,
-            category_series=category_series,
-            txn_count_series=txn_count_series,
-        )
+        return _trends_for_month_labels(session, month_labels)
 
     monthly_rows = session.execute(
         text("""
@@ -205,6 +355,7 @@ def get_trends(
             total_spend_series=[],
             category_series={},
             txn_count_series=[],
+            category_monthly=[],
         )
 
     category_series = _category_series_for_months(session, month_labels)
@@ -213,7 +364,41 @@ def get_trends(
         total_spend_series=total_spend_series,
         category_series=category_series,
         txn_count_series=txn_count_series,
+        category_monthly=[],
     )
+
+
+# ── GET /api/insights/category-year-merchants ─────────────────────────────
+
+
+@router.get("/category-year-merchants", response_model=CategoryYearMerchantsResponse)
+def get_category_year_merchants(
+    session: SessionDep,
+    year: Optional[int] = Query(None, ge=1990, le=2100),
+    trailing_calendar_months: Optional[int] = Query(
+        None,
+        ge=1,
+        le=24,
+        description="Trailing N calendar months ending at MAX(upload.month); use instead of year",
+    ),
+    category_id: Optional[int] = Query(
+        None,
+        description="Category id; omit for uncategorized (category_id IS NULL)",
+    ),
+):
+    if trailing_calendar_months is not None:
+        max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
+        if not max_row or max_row.m is None:
+            return CategoryYearMerchantsResponse(months=[], merchants=[])
+        month_labels = trailing_calendar_months_ending_at(max_row.m, trailing_calendar_months)
+        return _category_year_merchant_breakdown(session, month_labels, category_id)
+    if year is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either year or trailing_calendar_months",
+        )
+    month_labels = [f"{year}-{m:02d}" for m in range(1, 13)]
+    return _category_year_merchant_breakdown(session, month_labels, category_id)
 
 
 # ── GET /api/insights/anomalies ───────────────────────────────────────────

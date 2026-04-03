@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { api } from "@/lib/api-client"
+import { api, getApiErrorToastDescription } from "@/lib/api-client"
 import type { CategorizeRequest, CategorizeResponse } from "@/types/api"
 import { toast } from "sonner"
 
@@ -13,15 +13,20 @@ export function useCategorize() {
       api.post<CategorizeResponse>(`/api/transactions/${txnId}/categorize`, body),
     onSuccess(data) {
       qc.invalidateQueries({ queryKey: ["transactions"] })
-      if (data.rule_created) {
-        toast.success(
-          data.backfill_count === 1
-            ? t("transactionsTable.ruleCreatedOne")
-            : t("transactionsTable.ruleCreatedMany", { count: data.backfill_count }),
-        )
-      } else {
+      qc.invalidateQueries({ queryKey: ["needs-review"] })
+      qc.invalidateQueries({ queryKey: ["summary"] })
+      if (data.backfill_count <= 0) {
         toast.success(t("transactionsTable.categoryUpdated"))
+      } else {
+        toast.success(
+          t("transactionsTable.categoryPropagated", { count: data.backfill_count }),
+        )
       }
+    },
+    onError(err) {
+      toast.error(t("transactionsTable.categoryUpdateError"), {
+        description: getApiErrorToastDescription(err),
+      })
     },
   })
 }
