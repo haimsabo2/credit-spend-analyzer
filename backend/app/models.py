@@ -15,6 +15,18 @@ class UploadBase(SQLModel):
     size_bytes: int
     file_hash: str = Field(index=True, description="SHA-256 hash of the file contents")
     num_transactions: int = 0
+    skipped_duplicates_count: int = Field(
+        default=0,
+        description="Rows in file that matched existing row_signature (no new transaction)",
+    )
+    enriched_row_count: Optional[int] = Field(
+        default=None,
+        description="For enrich_only uploads: rows updated with source trace",
+    )
+    stored_path: Optional[str] = Field(
+        default=None,
+        description="Filename or path under upload storage dir for the original XLS",
+    )
 
 
 class Upload(UploadBase, table=True):
@@ -25,7 +37,10 @@ class Upload(UploadBase, table=True):
         description="Time the upload was created",
     )
 
-    transactions: List["Transaction"] = Relationship(back_populates="upload")
+    transactions: List["Transaction"] = Relationship(
+        back_populates="upload",
+        sa_relationship_kwargs={"foreign_keys": "[Transaction.upload_id]"},
+    )
 
 
 class CategoryBase(SQLModel):
@@ -112,6 +127,21 @@ class TransactionBase(SQLModel):
         default=False,
         description="If true, auto-categorization must not change spend_pattern",
     )
+    source_row_1based: Optional[int] = Field(
+        default=None,
+        index=True,
+        description="1-based row index in the source XLS (first sheet) for this transaction line",
+    )
+    source_sheet_index: Optional[int] = Field(
+        default=None,
+        description="0-based worksheet index (parser currently uses first sheet only)",
+    )
+    source_trace_upload_id: Optional[int] = Field(
+        default=None,
+        foreign_key="upload.id",
+        index=True,
+        description="Upload row whose stored XLS is used for source download / row location",
+    )
 
 
 class Transaction(TransactionBase, table=True):
@@ -133,7 +163,10 @@ class Transaction(TransactionBase, table=True):
         index=True,
     )
 
-    upload: Optional[Upload] = Relationship(back_populates="transactions")
+    upload: Optional[Upload] = Relationship(
+        back_populates="transactions",
+        sa_relationship_kwargs={"foreign_keys": "[Transaction.upload_id]"},
+    )
     category: Optional[Category] = Relationship(back_populates="transactions")
     subcategory: Optional["Subcategory"] = Relationship()
 

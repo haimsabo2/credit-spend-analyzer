@@ -18,6 +18,9 @@ class UploadRead(SQLModel):
     size_bytes: int
     file_hash: str
     num_transactions: int
+    skipped_duplicates_count: int = 0
+    enriched_row_count: Optional[int] = None
+    stored_path: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -28,6 +31,11 @@ class AutoCategorizeSummary(SQLModel):
     needs_review: int
     failed: int
     failures_sample: List[str]
+
+
+class EnrichConflictSide(SQLModel):
+    count: int
+    sample: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class UploadCreateResponse(SQLModel):
@@ -42,6 +50,10 @@ class UploadCreateResponse(SQLModel):
     skipped_noise_count: int
     categorization: AutoCategorizeSummary
     categorization_deferred: bool = False
+    enrich_only: bool = False
+    enriched_count: int = 0
+    conflict_only_in_database: Optional[EnrichConflictSide] = None
+    conflict_only_in_file: Optional[EnrichConflictSide] = None
 
 
 class CategorizeQueueResponse(SQLModel):
@@ -80,6 +92,12 @@ class TransactionRead(SQLModel):
     meta_json: Optional[str] = None
     spend_pattern: str = "unknown"
     spend_pattern_user_set: bool = False
+    source_row_1based: Optional[int] = None
+    source_sheet_index: Optional[int] = None
+    source_trace_upload_id: Optional[int] = None
+    source_upload_original_filename: Optional[str] = None
+    source_stored_file_available: bool = False
+    source_cells: Optional[List[str]] = None
 
     model_config = {"from_attributes": True}
 
@@ -156,6 +174,7 @@ class LLMCategorizationResult(SQLModel):
     merchant_key_guess: Optional[str] = None
     suggested_new_category: Optional[SuggestedCategory] = None
     spend_pattern: str = "unknown"
+    subcategory_name_he: Optional[str] = None
 
 
 class SpendPatternUpdate(SQLModel):
@@ -372,6 +391,16 @@ class MerchantSpendGroupMemberRead(SQLModel):
 
 class MerchantSpendGroupMemberCreate(SQLModel):
     pattern_key: str
+
+
+class MerchantSpendGroupMemberAddResult(SQLModel):
+    """Adding a member: exact key, or bulk expansion via * / ? or multiple words."""
+
+    bulk: bool
+    added: List[MerchantSpendGroupMemberRead]
+    skipped_already_in_this_group: List[str] = Field(default_factory=list)
+    blocked_other_group: List[str] = Field(default_factory=list)
+    unmatched: bool = False
 
 
 class MerchantGroupSeriesResponse(SQLModel):

@@ -11,17 +11,35 @@ export async function listTransactions(month: string, limit = 500, offset = 0): 
 }
 
 export async function listMerchantGroups(params: {
-  approved: boolean
+  approved?: boolean
   q?: string
   limit?: number
   offset?: number
+  /** When set, ignores approved filter; lists groups by representative category */
+  category_id?: number
+  uncategorized_only?: boolean
+  subcategory_id?: number
+  missing_subcategory?: boolean
 }): Promise<MerchantGroupListResponse> {
-  const { approved, q, limit = 100, offset = 0 } = params
+  const {
+    approved = false,
+    q,
+    limit = 100,
+    offset = 0,
+    category_id,
+    uncategorized_only,
+    subcategory_id,
+    missing_subcategory,
+  } = params
   return api.get<MerchantGroupListResponse>("/transactions/merchant-groups", {
     approved,
     q,
     limit,
     offset,
+    category_id,
+    uncategorized_only,
+    subcategory_id,
+    missing_subcategory,
   })
 }
 

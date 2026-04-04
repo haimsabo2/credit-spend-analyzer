@@ -20,6 +20,7 @@ export function UploadJobBanner() {
   const phase = useUploadJobStore((s) => s.phase)
   const month = useUploadJobStore((s) => s.month)
   const uploadPercent = useUploadJobStore((s) => s.uploadPercent)
+  const serverProcessing = useUploadJobStore((s) => s.serverProcessing)
   const categorizePercent = useUploadJobStore((s) => s.categorizePercent)
   const errorMessage = useUploadJobStore((s) => s.errorMessage)
   const dismiss = useUploadJobStore((s) => s.dismiss)
@@ -57,6 +58,9 @@ export function UploadJobBanner() {
                     <span>{uploadPercent}%</span>
                   </div>
                   <Progress value={uploadPercent} />
+                  {serverProcessing ? (
+                    <p className="text-muted-foreground text-xs">{t("upload.jobServerProcessing")}</p>
+                  ) : null}
                 </>
               )}
               {phase === "categorizing" && (

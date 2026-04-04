@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
-import { LayoutDashboard, Upload, CalendarDays, List, AlertCircle, CreditCard, Trash2, Loader2, Tags } from "lucide-react"
+import { LayoutDashboard, Upload, CalendarDays, List, AlertCircle, CreditCard, Trash2, Loader2, Tags, LayoutList } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { api, getApiErrorToastDescription } from "@/lib/api-client"
@@ -26,6 +26,7 @@ const links = [
   { to: "/transactions", labelKey: "nav.transactions" as const, icon: List },
   { to: "/review", labelKey: "nav.needsReview" as const, icon: AlertCircle },
   { to: "/merchant-spend-groups", labelKey: "nav.merchantSpendGroups" as const, icon: Tags },
+  { to: "/categories/merchants", labelKey: "nav.categoryMerchants" as const, icon: LayoutList },
 ] as const
 
 export function Sidebar() {

@@ -56,6 +56,7 @@ export default function UploadPage() {
   }, [month])
   const [files, setFiles] = useState<File[]>([])
   const [replaceMonth, setReplaceMonth] = useState(false)
+  const [enrichOnly, setEnrichOnly] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const monthLockedByUserRef = useRef(false)
 
@@ -125,20 +126,21 @@ export default function UploadPage() {
   }
 
   const startPipeline = () => {
-    const ok = beginJob(month, replaceMonth, files)
+    const ok = beginJob(month, replaceMonth, enrichOnly, files)
     if (!ok) {
       toast.error(t("upload.jobAlreadyRunning"))
       return
     }
     setFiles([])
     setReplaceMonth(false)
+    setEnrichOnly(false)
     if (fileInputRef.current) fileInputRef.current.value = ""
     setConfirmOpen(false)
   }
 
   const handleSubmit = () => {
     if (files.length === 0 || jobRunning) return
-    if (replaceMonth) {
+    if (replaceMonth && !enrichOnly) {
       setConfirmOpen(true)
       return
     }
@@ -271,12 +273,35 @@ export default function UploadPage() {
           </ul>
         )}
 
+        <div className="flex items-start gap-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <Checkbox
+            id="enrich-only"
+            checked={enrichOnly}
+            disabled={jobRunning}
+            onCheckedChange={(c) => {
+              const v = c === true
+              setEnrichOnly(v)
+              if (v) setReplaceMonth(false)
+            }}
+          />
+          <div className="grid gap-1">
+            <label htmlFor="enrich-only" className="cursor-pointer text-sm font-medium leading-none">
+              {t("upload.enrichOnlyCheckbox")}
+            </label>
+            <p className="text-xs text-muted-foreground">{t("upload.enrichOnlyHint")}</p>
+          </div>
+        </div>
+
         <div className="flex items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
           <Checkbox
             id="replace-month"
             checked={replaceMonth}
-            disabled={jobRunning}
-            onCheckedChange={(c) => setReplaceMonth(c === true)}
+            disabled={jobRunning || enrichOnly}
+            onCheckedChange={(c) => {
+              const v = c === true
+              setReplaceMonth(v)
+              if (v) setEnrichOnly(false)
+            }}
           />
           <div className="grid gap-1">
             <label htmlFor="replace-month" className="cursor-pointer text-sm font-medium leading-none">

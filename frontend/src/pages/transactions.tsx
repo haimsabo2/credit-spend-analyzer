@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
+import type { TransactionRead } from "@/types/api"
 import { useSearchParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -12,6 +13,7 @@ import { SubcategoryManageDialog } from "@/components/transactions/subcategory-m
 import { DataTable } from "@/components/transactions/data-table"
 import { TransactionsByMonthGroupedTable } from "@/components/transactions/transactions-by-month-grouped-table"
 import { getTransactionColumns } from "@/components/transactions/columns"
+import { TransactionSourceDialog } from "@/components/transactions/transaction-source-dialog"
 import { getMerchantGroupColumns } from "@/components/transactions/merchant-group-columns"
 import type { TransactionQueryParams } from "@/types/api"
 import type { MerchantGroupRow } from "@/types/api"
@@ -111,7 +113,20 @@ export default function TransactionsPage() {
     [t, unapproveMut.mutate, actionBusy],
   )
 
-  const columns = useMemo(() => getTransactionColumns(t, { plainHeaders: true }), [t])
+  const [sourceTxn, setSourceTxn] = useState<TransactionRead | null>(null)
+  const [sourceOpen, setSourceOpen] = useState(false)
+
+  const columns = useMemo(
+    () =>
+      getTransactionColumns(t, {
+        plainHeaders: true,
+        onOpenSource: (row) => {
+          setSourceTxn(row)
+          setSourceOpen(true)
+        },
+      }),
+    [t],
+  )
 
   const txns = useTransactions(queryParams)
   const merchantQ = filters.q.trim()
@@ -153,6 +168,11 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-6">
+      <TransactionSourceDialog
+        open={sourceOpen}
+        onOpenChange={setSourceOpen}
+        transaction={sourceTxn}
+      />
       <h1 className="text-2xl font-semibold tracking-tight">{t("transactionsTable.title")}</h1>
 
       <div className="inline-flex rounded-md border p-0.5 bg-muted/40">

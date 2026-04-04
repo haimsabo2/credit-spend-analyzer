@@ -10,6 +10,7 @@ import MonthsPage from "@/pages/months"
 import TransactionsPage from "@/pages/transactions"
 import NeedsReviewPage from "@/pages/needs-review"
 import MerchantSpendGroupsPage from "@/pages/merchant-spend-groups"
+import CategoryMerchantsPage from "@/pages/category-merchants"
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="review" element={<NeedsReviewPage />} />
             <Route path="merchant-spend-groups" element={<MerchantSpendGroupsPage />} />
+            <Route path="categories/merchants" element={<CategoryMerchantsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

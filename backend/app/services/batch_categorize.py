@@ -10,9 +10,13 @@ from typing import Any, List, Optional
 from sqlmodel import Session
 
 from ..config import get_settings
-from ..models import Transaction
+from ..models import Subcategory, Transaction
 from ..schemas import AutoCategorizeSummary, LLMCategorizationResult
-from .categories import get_category_id_by_name_he
+from .categories import (
+    get_category_id_by_name_he,
+    get_subcategory_id_by_parent_and_name,
+    resolve_llm_category_subcategory_names,
+)
 from .classification import find_matching_rule
 from .categorizer import categorize_transaction as llm_categorize
 from .categorizer import categorize_transactions_batch
@@ -27,6 +31,19 @@ REASON_PENDING_MANUAL_OR_AI = "pending:manual_or_ai"
 
 _MAX_FAILURE_SAMPLES = 5
 _BATCH_SIZE = 25
+
+
+def _clear_subcategory_if_wrong_parent(
+    session: Session, txn: Transaction, category_id: int | None
+) -> None:
+    if category_id is None:
+        txn.subcategory_id = None
+        return
+    if not txn.subcategory_id:
+        return
+    sub = session.get(Subcategory, txn.subcategory_id)
+    if not sub or sub.category_id != category_id:
+        txn.subcategory_id = None
 
 
 def _run_llm_safe(txn: Transaction) -> tuple[int, LLMCategorizationResult | None, Exception | None]:
@@ -167,9 +184,19 @@ def _run_llm_categorization_core(
             continue
 
         try:
+            cat_name, sub_name = resolve_llm_category_subcategory_names(
+                result.category_name_he,
+                result.subcategory_name_he,
+            )
             with session.no_autoflush:
-                cat_id = get_category_id_by_name_he(session, result.category_name_he)
+                cat_id = get_category_id_by_name_he(session, cat_name)
             txn.category_id = cat_id
+            sub_id: int | None = None
+            if sub_name and cat_id is not None:
+                sub_id = get_subcategory_id_by_parent_and_name(
+                    session, cat_id, sub_name
+                )
+            txn.subcategory_id = sub_id
             txn.confidence = result.confidence
             txn.reason_he = result.reason_he
             txn.needs_review = result.needs_review
@@ -294,6 +321,7 @@ def batch_categorize_transactions(
                 rule = find_matching_rule(session, txn)
             if rule is not None:
                 txn.category_id = rule.category_id
+                _clear_subcategory_if_wrong_parent(session, txn, rule.category_id)
                 txn.confidence = 0.9
                 txn.rule_id_applied = rule.id
                 txn.needs_review = False
@@ -311,6 +339,12 @@ def batch_categorize_transactions(
                         session, dict_hit.category_name_he
                     )
                 txn.category_id = cat_id
+                sub_id = None
+                if dict_hit.subcategory_name_he and cat_id is not None:
+                    sub_id = get_subcategory_id_by_parent_and_name(
+                        session, cat_id, dict_hit.subcategory_name_he
+                    )
+                txn.subcategory_id = sub_id
                 txn.confidence = dict_hit.confidence
                 txn.reason_he = dict_hit.reason_he
                 txn.needs_review = False
@@ -366,6 +400,7 @@ def batch_categorize_transactions(
             )
             for txn in llm_ready:
                 txn.category_id = None
+                txn.subcategory_id = None
                 txn.needs_review = True
                 txn.reason_he = REASON_PENDING_MANUAL_OR_AI
                 txn.confidence = 0.0

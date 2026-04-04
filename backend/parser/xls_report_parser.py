@@ -39,6 +39,9 @@ class TransactionNormalized(BaseModel):
     voucher_number: Optional[str] = None
     details: Optional[str] = None
     row_signature: str
+    source_sheet_index: Optional[int] = None
+    source_row_1based: Optional[int] = None
+    source_cells: Optional[List[str]] = None
 
 
 @dataclass
@@ -127,7 +130,16 @@ class XlsReportParser:
                 tx = self._parse_foreign_row(cells)
 
             if tx is not None:
-                transactions.append(tx)
+                cells8 = (str_cells + [""] * 8)[:8]
+                transactions.append(
+                    tx.model_copy(
+                        update={
+                            "source_row_1based": idx + 1,
+                            "source_sheet_index": 0,
+                            "source_cells": cells8,
+                        }
+                    )
+                )
 
         return transactions
 

@@ -7,7 +7,7 @@ import { SubcategoryCell } from "./subcategory-cell"
 import { SpendPatternCell } from "./spend-pattern-cell"
 import { formatCurrency } from "@/lib/format"
 import { formatTransactionTableDate } from "@/utils/format"
-import { ArrowUpDown } from "lucide-react"
+import { ArrowUpDown, FileSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 function SortHeader({
@@ -33,10 +33,11 @@ function SortHeader({
 
 export function getTransactionColumns(
   t: TFunction,
-  options?: { plainHeaders?: boolean },
+  options?: { plainHeaders?: boolean; onOpenSource?: (row: TransactionRead) => void },
 ): ColumnDef<TransactionRead>[] {
   const plain = options?.plainHeaders === true
-  return [
+  const onSource = options?.onOpenSource
+  const cols: ColumnDef<TransactionRead>[] = [
     {
       accessorKey: "posted_at",
       header: plain
@@ -164,4 +165,25 @@ export function getTransactionColumns(
       enableSorting: false,
     },
   ]
+  if (onSource) {
+    cols.push({
+      id: "source",
+      header: t("transactionSource.colShort"),
+      cell: ({ row }) => (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          onClick={() => onSource(row.original)}
+          title={t("transactionSource.open")}
+        >
+          <FileSearch className="h-4 w-4" />
+        </Button>
+      ),
+      size: 44,
+      enableSorting: false,
+    })
+  }
+  return cols
 }

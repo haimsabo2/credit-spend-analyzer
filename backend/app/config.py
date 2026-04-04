@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     categorize_llm_batch_size: int = 32
     # When false, auto-categorize uses rules + dictionary only; use llm-categorize-pending for AI.
     auto_categorize_use_llm: bool = False
+    # Directory for persisted XLS uploads (empty = backend/data/upload_files).
+    upload_storage_dir: str = ""
 
     class Config:
         env_prefix = "CSA_"

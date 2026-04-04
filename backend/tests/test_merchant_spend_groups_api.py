@@ -50,7 +50,10 @@ def test_create_group_and_member(seeded_client: TestClient):
         json={"pattern_key": pk},
     )
     assert m.status_code == 201
-    assert m.json()["pattern_key"] == pk
+    body = m.json()
+    assert body["bulk"] is False
+    assert len(body["added"]) == 1
+    assert body["added"][0]["pattern_key"] == pk
 
     lst = seeded_client.get(f"/api/merchant-spend-groups/{gid}/members").json()
     assert len(lst) == 1
@@ -98,3 +101,79 @@ def test_duplicate_pattern_in_other_group_rejected(seeded_client: TestClient):
         json={"pattern_key": pk},
     )
     assert r.status_code == 409
+
+
+def test_add_member_bulk_two_words_and(seeded_client: TestClient):
+    """Space-separated tokens → all must appear as substrings (order-free via *a*b*)."""
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "Words test"},
+    ).json()
+    txns = seeded_client.get("/api/transactions", params={"limit": 200}).json()
+    assert txns
+    taken: set[str] = set()
+    for grp in seeded_client.get("/api/merchant-spend-groups").json():
+        mid = grp["id"]
+        for m in seeded_client.get(f"/api/merchant-spend-groups/{mid}/members").json():
+            taken.add(m["pattern_key"])
+    blob = None
+    parts: list[str] = []
+    for t in txns:
+        desc = (t.get("description") or "").strip().lower()
+        if not desc or desc in taken:
+            continue
+        parts = [p for p in desc.replace("\t", " ").split() if len(p) > 1]
+        if len(parts) < 2:
+            continue
+        # If the line is exactly those two tokens, input matches a full pattern_key → single-key mode.
+        if desc == f"{parts[0]} {parts[1]}":
+            continue
+        blob = f"{parts[0]} {parts[1]}"
+        break
+    if not blob:
+        pytest.skip("No free two-token merchant line for bulk test")
+    r = seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/members",
+        json={"pattern_key": blob},
+    )
+    assert r.status_code == 201
+    data = r.json()
+    assert data["bulk"] is True
+    assert len(data["added"]) >= 1
+    hit = data["added"][0]["pattern_key"]
+    assert parts[0] in hit and parts[1] in hit
+
+
+def test_add_member_bulk_wildcard_matches_many(seeded_client: TestClient):
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "Bulk test"},
+    ).json()
+    gid = g["id"]
+    txns = seeded_client.get("/api/transactions", params={"limit": 50}).json()
+    assert txns
+    pks = list({(t["description"] or "").strip().lower() for t in txns if t.get("description")})
+    assert pks
+    stub = pks[0][: max(3, min(6, len(pks[0])))]
+    r = seeded_client.post(
+        f"/api/merchant-spend-groups/{gid}/members",
+        json={"pattern_key": f"*{stub}*"},
+    )
+    assert r.status_code == 201
+    data = r.json()
+    assert data["bulk"] is True
+    assert len(data["added"]) >= 1
+    for row in data["added"]:
+        assert stub in row["pattern_key"]
+
+
+def test_add_member_wildcard_only_rejected(seeded_client: TestClient):
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "Reject"},
+    ).json()
+    r = seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/members",
+        json={"pattern_key": "***"},
+    )
+    assert r.status_code == 422

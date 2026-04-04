@@ -19,8 +19,9 @@ interface UploadJobState {
   categorizeStageId: string | null
   categorizeStageDetail: Record<string, unknown> | null
   errorMessage: string | null
+  serverProcessing: boolean
 
-  beginJob: (month: string, replaceMonth: boolean, files: File[]) => boolean
+  beginJob: (month: string, replaceMonth: boolean, enrichOnly: boolean, files: File[]) => boolean
   applyPatch: (patch: UploadJobPatch) => void
   dismiss: () => void
 }
@@ -44,8 +45,9 @@ export const useUploadJobStore = create<UploadJobState>()(
       categorizeStageId: null,
       categorizeStageDetail: null,
       errorMessage: null,
+      serverProcessing: false,
 
-      beginJob: (month, replaceMonth, files) => {
+      beginJob: (month, replaceMonth, enrichOnly, files) => {
         if (!files.length) return false
         const cur = get()
         if (jobInFlight(cur)) return false
@@ -69,9 +71,10 @@ export const useUploadJobStore = create<UploadJobState>()(
           categorizeStageId: null,
           categorizeStageDetail: null,
           errorMessage: null,
+          serverProcessing: false,
         })
         queueMicrotask(() => {
-          void runUploadJobPipeline(jobId, month, replaceMonth, (patch) => {
+          void runUploadJobPipeline(jobId, month, replaceMonth, enrichOnly, (patch) => {
             get().applyPatch(patch)
           })
         })
@@ -96,6 +99,7 @@ export const useUploadJobStore = create<UploadJobState>()(
           categorizeStageId: null,
           categorizeStageDetail: null,
           errorMessage: null,
+          serverProcessing: false,
         })
       },
     }),

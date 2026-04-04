@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlmodel import select
 
 from ..dependencies import SessionDep
 from ..models import Upload
-from ..schemas import UploadCreateResponse, UploadRead
+from ..schemas import EnrichConflictSide, UploadCreateResponse, UploadRead
 from ..services.uploads import handle_upload
+from ..upload_storage import resolve_upload_file_path
 
 router = APIRouter()
 
@@ -24,6 +26,10 @@ def post_upload(
         False,
         description="If true, only ingest rows; run categorization separately (e.g. after parallel uploads)",
     ),
+    enrich_only: bool = Form(
+        False,
+        description="If true, only update source-trace fields on existing transactions for this month; no new rows",
+    ),
 ):
     """Upload an .xls credit card report and associate it with a statement month.
 
@@ -32,6 +38,9 @@ def post_upload(
 
     By default, new transactions are categorized automatically. Use defer_categorization=true to ingest
     only, then POST /api/transactions/auto-categorize or auto-categorize-chunk for that month.
+
+    Use enrich_only=true to attach XLS row provenance without inserting transactions or changing categories.
+    Cannot combine enrich_only with replace_month.
     """
     if not month or len(month) != 7 or month[4] != "-":
         raise HTTPException(422, detail="month must be YYYY-MM")
@@ -45,13 +54,36 @@ def post_upload(
     if not file.filename or not file.filename.lower().endswith(".xls"):
         raise HTTPException(422, detail="File must be a .xls file")
 
-    result = handle_upload(
-        session,
-        file,
-        month,
-        replace_month=replace_month,
-        defer_categorization=defer_categorization,
-    )
+    if enrich_only and replace_month:
+        raise HTTPException(
+            422,
+            detail="enrich_only and replace_month cannot both be true",
+        )
+
+    try:
+        result = handle_upload(
+            session,
+            file,
+            month,
+            replace_month=replace_month,
+            defer_categorization=defer_categorization,
+            enrich_only=enrich_only,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+
+    conflict_db: EnrichConflictSide | None = None
+    conflict_file: EnrichConflictSide | None = None
+    if result.enrich_only:
+        conflict_db = EnrichConflictSide(
+            count=result.only_in_database_count,
+            sample=result.only_in_database_sample,
+        )
+        conflict_file = EnrichConflictSide(
+            count=result.only_in_file_count,
+            sample=result.only_in_file_sample,
+        )
+
     return UploadCreateResponse(
         upload_id=result.upload.id,
         month=result.upload.month,
@@ -63,7 +95,28 @@ def post_upload(
         skipped_duplicates_count=result.skipped_duplicates_count,
         skipped_noise_count=result.skipped_noise_count,
         categorization=result.categorization,
-        categorization_deferred=defer_categorization,
+        categorization_deferred=defer_categorization and not result.enrich_only,
+        enrich_only=result.enrich_only,
+        enriched_count=result.enriched_count,
+        conflict_only_in_database=conflict_db,
+        conflict_only_in_file=conflict_file,
+    )
+
+
+@router.get("/{upload_id}/file")
+def download_upload_file(upload_id: int, session: SessionDep):
+    """Download the persisted original XLS for this upload, if available."""
+    u = session.get(Upload, upload_id)
+    if not u or not u.stored_path:
+        raise HTTPException(404, detail="Upload file not found")
+    path = resolve_upload_file_path(u.stored_path)
+    if path is None or not path.is_file():
+        raise HTTPException(404, detail="Upload file missing on disk")
+    media = u.content_type or "application/vnd.ms-excel"
+    return FileResponse(
+        path,
+        filename=u.original_filename,
+        media_type=media,
     )
 
 
@@ -74,4 +127,4 @@ def get_uploads(session: SessionDep, month: str | None = None):
     if month:
         stmt = stmt.where(Upload.month == month)
     uploads = session.exec(stmt).all()
-    return [UploadRead.from_orm(u) for u in uploads]
+    return [UploadRead.model_validate(x) for x in uploads]

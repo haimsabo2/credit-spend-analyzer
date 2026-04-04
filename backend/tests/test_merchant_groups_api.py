@@ -132,3 +132,39 @@ def test_merchant_groups_search_q(seeded_client: TestClient):
     data = r.json()
     assert data["total"] >= 1
     assert any(term.lower() in (x["display_description"] or "").lower() for x in data["items"])
+
+
+def test_merchant_groups_filter_by_category_id(seeded_client: TestClient):
+    data = _first_group(seeded_client, approved=False)
+    if not data["items"]:
+        pytest.skip("No merchant groups")
+    with_cid = next((x for x in data["items"] if x.get("category_id") is not None), None)
+    if not with_cid:
+        pytest.skip("No categorized merchant groups in fixture")
+    cid = with_cid["category_id"]
+    r = seeded_client.get(
+        "/api/transactions/merchant-groups",
+        params={"category_id": cid, "limit": 500, "offset": 0},
+    )
+    assert r.status_code == 200
+    out = r.json()
+    for item in out["items"]:
+        assert item["category_id"] == cid
+
+
+def test_merchant_groups_rejects_subcategory_without_category(seeded_client: TestClient):
+    r = seeded_client.get(
+        "/api/transactions/merchant-groups",
+        params={"subcategory_id": 1, "limit": 10},
+    )
+    assert r.status_code == 422
+
+
+def test_merchant_groups_uncategorized_only(seeded_client: TestClient):
+    r = seeded_client.get(
+        "/api/transactions/merchant-groups",
+        params={"uncategorized_only": True, "limit": 500},
+    )
+    assert r.status_code == 200
+    for item in r.json()["items"]:
+        assert item["category_id"] is None

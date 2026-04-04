@@ -109,7 +109,7 @@ export default function MonthsPage() {
 
   function handleUpload() {
     if (selectedFiles.length === 0 || jobRunning) return
-    const ok = beginJob(uploadMonth, false, selectedFiles)
+    const ok = beginJob(uploadMonth, false, false, selectedFiles)
     if (!ok) {
       toast.error(t("upload.jobAlreadyRunning"))
       return
@@ -265,11 +265,11 @@ export default function MonthsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Month</TableHead>
-                    <TableHead>Filename</TableHead>
-                    <TableHead className="text-right">Transactions</TableHead>
-                    <TableHead className="text-right">Size</TableHead>
-                    <TableHead className="text-right">Uploaded</TableHead>
+                    <TableHead>{t("monthsPage.colMonth")}</TableHead>
+                    <TableHead>{t("monthsPage.colFilename")}</TableHead>
+                    <TableHead className="text-right">{t("monthsPage.colEffect")}</TableHead>
+                    <TableHead className="text-right">{t("monthsPage.colSize")}</TableHead>
+                    <TableHead className="text-right">{t("monthsPage.colUploaded")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -287,8 +287,15 @@ export default function MonthsPage() {
                       <TableCell className="max-w-[200px] truncate text-sm">
                         {u.original_filename}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {u.num_transactions}
+                      <TableCell className="text-right text-sm tabular-nums">
+                        {u.enriched_row_count != null
+                          ? t("monthsPage.effectEnriched", { count: u.enriched_row_count })
+                          : u.num_transactions === 0 &&
+                              (u.skipped_duplicates_count ?? 0) > 0
+                            ? t("monthsPage.effectNewWithDuplicates", {
+                                n: u.skipped_duplicates_count ?? 0,
+                              })
+                            : u.num_transactions}
                       </TableCell>
                       <TableCell className="text-right text-sm text-muted-foreground">
                         {t("monthsPage.sizeKB", { n: (u.size_bytes / 1024).toFixed(0) })}

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from backend.app.models import Transaction
+from backend.app.services.categories import (
+    LEISURE_CATEGORY_NAME_HE,
+    RESTAURANTS_SUBCATEGORY_NAME_HE,
+)
 from backend.app.services.dictionary_rules import dictionary_categorize
 
 
@@ -73,3 +77,10 @@ def test_reason_he_contains_keyword():
     result = dictionary_categorize(_make_tx("רמי לוי"))
     assert result is not None
     assert "רמי לוי" in result.reason_he
+
+
+def test_dictionary_wolt_leisure_and_restaurants_sub():
+    result = dictionary_categorize(_make_tx("WOLT חיפה"))
+    assert result is not None
+    assert result.category_name_he == LEISURE_CATEGORY_NAME_HE
+    assert result.subcategory_name_he == RESTAURANTS_SUBCATEGORY_NAME_HE

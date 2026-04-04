@@ -10,6 +10,9 @@ export interface UploadRead {
   size_bytes: number
   file_hash: string
   num_transactions: number
+  skipped_duplicates_count?: number
+  enriched_row_count?: number | null
+  stored_path?: string | null
 }
 
 export interface AutoCategorizeSummary {
@@ -18,6 +21,11 @@ export interface AutoCategorizeSummary {
   needs_review: number
   failed: number
   failures_sample: string[]
+}
+
+export interface EnrichConflictSide {
+  count: number
+  sample: Record<string, unknown>[]
 }
 
 export interface UploadCreateResponse {
@@ -32,6 +40,10 @@ export interface UploadCreateResponse {
   skipped_noise_count: number
   categorization: AutoCategorizeSummary
   categorization_deferred?: boolean
+  enrich_only?: boolean
+  enriched_count?: number
+  conflict_only_in_database?: EnrichConflictSide | null
+  conflict_only_in_file?: EnrichConflictSide | null
 }
 
 export interface CategorizeQueueResponse {
@@ -66,6 +78,12 @@ export interface TransactionRead {
   rule_id_applied: number | null
   spend_pattern?: string
   spend_pattern_user_set?: boolean
+  source_row_1based?: number | null
+  source_sheet_index?: number | null
+  source_trace_upload_id?: number | null
+  source_upload_original_filename?: string | null
+  source_stored_file_available?: boolean
+  source_cells?: string[] | null
 }
 
 export interface CategorizeRequest {
@@ -114,6 +132,14 @@ export interface MerchantSpendGroupMemberRead {
   id: number
   group_id: number
   pattern_key: string
+}
+
+export interface MerchantSpendGroupMemberAddResult {
+  bulk: boolean
+  added: MerchantSpendGroupMemberRead[]
+  skipped_already_in_this_group: string[]
+  blocked_other_group: string[]
+  unmatched: boolean
 }
 
 export interface MerchantGroupSeriesResponse {

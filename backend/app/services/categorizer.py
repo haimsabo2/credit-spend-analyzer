@@ -32,7 +32,7 @@ The user message is JSON: `{"transactions":[...]}` — one object per row, each 
 
 Return **only** a JSON **array** (no markdown fences). The array must have **exactly one object per input transaction**. Each object must include:
 - **id** (same integer as input)
-- **category**, **confidence**, **needs_review**, **reason_he**, **spend_pattern**, **merchant_key_guess**, **suggest_new_category** (same rules as single-transaction output).
+- **category**, **subcategory** (optional, same rules as single-transaction output), **confidence**, **needs_review**, **reason_he**, **spend_pattern**, **merchant_key_guess**, **suggest_new_category** (same rules as single-transaction output).
 
 Order of array elements is free; every input **id** must appear exactly once.
 """
@@ -125,6 +125,12 @@ def _dict_to_llm_result(data: dict[str, Any]) -> LLMCategorizationResult:
             why_needed_he=sc.get("why_needed_he", ""),
         )
 
+    sub_raw = data.get("subcategory") or data.get("subcategory_name_he")
+    if sub_raw is None or not isinstance(sub_raw, str):
+        sub_he = None
+    else:
+        sub_he = sub_raw.strip() or None
+
     return LLMCategorizationResult(
         category_name_he=data["category"],
         confidence=float(data["confidence"]),
@@ -133,6 +139,7 @@ def _dict_to_llm_result(data: dict[str, Any]) -> LLMCategorizationResult:
         merchant_key_guess=data.get("merchant_key_guess"),
         suggested_new_category=suggested,
         spend_pattern=normalize_spend_pattern(data.get("spend_pattern")),
+        subcategory_name_he=sub_he,
     )
 
 

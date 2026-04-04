@@ -4,6 +4,10 @@ export interface XlsUploadOptions {
   month: string
   replaceMonth?: boolean
   deferCategorization?: boolean
+  /** Update source row / file trace only; no new transactions */
+  enrichOnly?: boolean
+  /** Fired when the request body has finished uploading (before server response). */
+  onUploadBodySent?: () => void
 }
 
 /** POST /api/uploads with upload progress (SPA navigation does not cancel XHR). */
@@ -21,6 +25,10 @@ export function uploadXlsWithProgress(
       if (ev.lengthComputable && onProgress) {
         onProgress(ev.loaded, ev.total)
       }
+    }
+
+    xhr.upload.onload = () => {
+      opts.onUploadBodySent?.()
     }
 
     xhr.onload = () => {
@@ -44,6 +52,7 @@ export function uploadXlsWithProgress(
     fd.append("month", opts.month)
     if (opts.replaceMonth) fd.append("replace_month", "true")
     if (opts.deferCategorization) fd.append("defer_categorization", "true")
+    if (opts.enrichOnly) fd.append("enrich_only", "true")
     xhr.send(fd)
   })
 }

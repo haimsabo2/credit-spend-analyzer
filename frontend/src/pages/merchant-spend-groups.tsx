@@ -107,11 +107,31 @@ export default function MerchantSpendGroupsPage() {
 
   const addMemberMut = useMutation({
     mutationFn: () => addGroupMember(selectedId as number, patternInput.trim()),
-    onSuccess: () => {
+    onSuccess(res) {
       setPatternInput("")
       qc.invalidateQueries({ queryKey: ["merchant-spend-groups", selectedId, "members"] })
       qc.invalidateQueries({ queryKey: ["merchant-group-series"] })
-      toast.success(t("merchantSpendGroups.memberAdded"))
+      const n = res.added.length
+      const blocked = res.blocked_other_group.length
+      const skipped = res.skipped_already_in_this_group.length
+      if (res.unmatched) {
+        toast.error(t("merchantSpendGroups.memberNoMatch"))
+      } else if (res.bulk) {
+        if (n > 0) {
+          toast.success(t("merchantSpendGroups.memberAddedBulk", { count: n }))
+        }
+        if (skipped > 0) {
+          toast.message(t("merchantSpendGroups.memberSkippedInGroup", { count: skipped }))
+        }
+        if (blocked > 0) {
+          toast.warning(t("merchantSpendGroups.memberBlockedOtherGroup", { count: blocked }))
+        }
+        if (n === 0 && !skipped && !blocked) {
+          toast.error(t("merchantSpendGroups.memberNoMatch"))
+        }
+      } else if (n === 1) {
+        toast.success(t("merchantSpendGroups.memberAdded"))
+      }
     },
     onError: (err) => {
       toast.error(t("merchantSpendGroups.memberAddFailed"), {

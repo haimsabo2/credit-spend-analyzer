@@ -1,6 +1,7 @@
 import { api } from "./client"
 import type {
   MerchantGroupSeriesResponse,
+  MerchantSpendGroupMemberAddResult,
   MerchantSpendGroupMemberRead,
   MerchantSpendGroupRead,
 } from "@/types/api"
@@ -28,8 +29,8 @@ export async function listGroupMembers(
 export async function addGroupMember(
   groupId: number,
   patternKey: string,
-): Promise<MerchantSpendGroupMemberRead> {
-  return api.post<MerchantSpendGroupMemberRead>(
+): Promise<MerchantSpendGroupMemberAddResult> {
+  return api.post<MerchantSpendGroupMemberAddResult>(
     `/merchant-spend-groups/${groupId}/members`,
     { pattern_key: patternKey },
   )

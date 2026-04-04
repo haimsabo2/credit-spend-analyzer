@@ -216,16 +216,24 @@ export default function DashboardPage() {
     return Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, "0")}`)
   }, [isTrailing12, yearTrends?.months, selectedCalendarYear])
 
+  /** Trailing-12: month outside window — exit to that calendar year instead of overwriting storeMonth. */
   useEffect(() => {
     if (!isTrailing12 || !yearTrends?.months?.length) return
     if (yearTrends.months.includes(selectedMonth)) return
-    setStoreMonth(yearTrends.months[yearTrends.months.length - 1]!)
-  }, [isTrailing12, yearTrends?.months, selectedMonth, setStoreMonth])
+    const y = parseInt(selectedMonth.slice(0, 4), 10)
+    if (!Number.isFinite(y)) return
+    setPeriodSelect(String(y))
+  }, [isTrailing12, yearTrends?.months, selectedMonth])
 
+  /** Calendar year: clamp only when trends match this year (avoids race with topbar cross-year pick). */
   useEffect(() => {
     if (isTrailing12 || !yearTrends?.months?.length || selectedCalendarYear == null) return
+    const monthYear = parseInt(selectedMonth.slice(0, 4), 10)
+    if (!Number.isFinite(monthYear) || monthYear !== selectedCalendarYear) return
     const prefix = `${selectedCalendarYear}-`
     if (!yearTrends.months.some((m) => m.startsWith(prefix))) return
+    const first = yearTrends.months[0]
+    if (first && !first.startsWith(`${selectedCalendarYear}-`)) return
     if (yearTrends.months.includes(selectedMonth)) return
     setStoreMonth(yearTrends.months[yearTrends.months.length - 1]!)
   }, [

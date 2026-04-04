@@ -2,6 +2,7 @@ import i18n from "@/i18n"
 import { clearJobFiles, getJobFiles } from "@/lib/upload-job-files"
 import { queryClient } from "@/lib/query-client"
 import { uploadXlsWithProgress } from "@/lib/upload-xhr"
+import type { UploadCreateResponse } from "@/types/api"
 import { toast } from "sonner"
 
 const CHUNK_LIMIT = 64
@@ -27,6 +28,7 @@ export interface UploadJobPatch {
   categorizeStageDetail?: Record<string, unknown> | null
   fileSlots?: FileSlot[]
   errorMessage?: string | null
+  serverProcessing?: boolean
 }
 
 function invalidateDataQueries(): void {
@@ -41,6 +43,7 @@ export async function runUploadJobPipeline(
   jobId: string,
   month: string,
   replaceMonth: boolean,
+  enrichOnly: boolean,
   onUpdate: (patch: UploadJobPatch) => void,
 ): Promise<void> {
   if (_pipelines.has(jobId)) return
@@ -69,26 +72,34 @@ export async function runUploadJobPipeline(
     onUpdate({ uploadPercent: Math.min(100, Math.round((sum / totalBytes) * 100)) })
   }
 
-  const uploadOne = async (idx: number, useReplace: boolean) => {
+  const uploadOne = async (
+    idx: number,
+    useReplace: boolean,
+    useEnrich: boolean,
+  ): Promise<UploadCreateResponse> => {
     fileSlots[idx].status = "uploading"
     onUpdate({ fileSlots: [...fileSlots] })
     try {
-      await uploadXlsWithProgress(
+      const res = await uploadXlsWithProgress(
         files[idx],
         {
           month,
           replaceMonth: useReplace,
-          deferCategorization: true,
+          deferCategorization: !useEnrich,
+          enrichOnly: useEnrich,
+          onUploadBodySent: () => onUpdate({ serverProcessing: true }),
         },
         (loaded, total) => {
           perLoaded[idx] = total > 0 ? Math.min(loaded, total) : loaded
           setOverallUploadPct()
         },
       )
+      onUpdate({ serverProcessing: false })
       perLoaded[idx] = files[idx].size
       setOverallUploadPct()
       fileSlots[idx].status = "done"
       onUpdate({ fileSlots: [...fileSlots] })
+      return res
     } catch (e) {
       const msg = e instanceof Error ? e.message : "upload_failed"
       fileSlots[idx].status = "error"
@@ -105,11 +116,48 @@ export async function runUploadJobPipeline(
   }
 
   try {
+    if (enrichOnly) {
+      let totalEnriched = 0
+      let dbOnly = 0
+      let fileOnly = 0
+      for (let i = 0; i < files.length; i++) {
+        const r = await uploadOne(i, false, true)
+        totalEnriched += r.enriched_count ?? 0
+        dbOnly += r.conflict_only_in_database?.count ?? 0
+        fileOnly += r.conflict_only_in_file?.count ?? 0
+      }
+      onUpdate({
+        phase: "completed",
+        uploadPercent: 100,
+        categorizePercent: 100,
+        categorizeStageId: null,
+        categorizeStageDetail: null,
+      })
+      invalidateDataQueries()
+      clearJobFiles(jobId)
+      _pipelines.delete(jobId)
+      toast.success(
+        i18n.t("upload.enrichDoneToast", {
+          enriched: totalEnriched,
+          files: files.length,
+        }),
+      )
+      if (dbOnly > 0 || fileOnly > 0) {
+        toast.message(
+          i18n.t("upload.enrichConflictToast", {
+            dbOnly,
+            fileOnly,
+          }),
+        )
+      }
+      return
+    }
+
     if (replaceMonth && files.length > 0) {
-      await uploadOne(0, true)
-      await Promise.all(files.slice(1).map((_, i) => uploadOne(i + 1, false)))
+      await uploadOne(0, true, false)
+      await Promise.all(files.slice(1).map((_, i) => uploadOne(i + 1, false, false)))
     } else {
-      await Promise.all(files.map((_, i) => uploadOne(i, false)))
+      await Promise.all(files.map((_, i) => uploadOne(i, false, false)))
     }
   } catch {
     clearJobFiles(jobId)
@@ -123,6 +171,7 @@ export async function runUploadJobPipeline(
     categorizePercent: 0,
     categorizeStageId: null,
     categorizeStageDetail: null,
+    serverProcessing: false,
   })
 
   try {
@@ -198,6 +247,9 @@ export async function runUploadJobPipeline(
         return
       }
       lastPending = remaining
+      await new Promise<void>((r) => {
+        setTimeout(r, 0)
+      })
     }
 
     onUpdate({

@@ -93,6 +93,9 @@ export interface UploadRead {
   size_bytes: number
   file_hash: string
   num_transactions: number
+  skipped_duplicates_count?: number
+  enriched_row_count?: number | null
+  stored_path?: string | null
 }
 
 export interface AutoCategorizeSummary {

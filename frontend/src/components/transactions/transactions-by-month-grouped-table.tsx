@@ -303,6 +303,8 @@ function renderGroupCell({
           title={t("transactionsTable.reviewDotCategorized")}
         />
       )
+    case "source":
+      return <span className="text-muted-foreground">—</span>
     default:
       return null
   }

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from typing import Any, Iterable
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import and_, or_, text
@@ -38,6 +40,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _source_cells_from_raw(raw_row_data: str | None) -> list[str] | None:
+    if not raw_row_data:
+        return None
+    try:
+        data = json.loads(raw_row_data)
+        cells = data.get("source_cells")
+        if isinstance(cells, list) and all(isinstance(x, str) for x in cells):
+            return cells
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None
+
+
+def transaction_to_read(session: Session, t: Transaction) -> TransactionRead:
+    r = TransactionRead.model_validate(t)
+    r.source_cells = _source_cells_from_raw(t.raw_row_data)
+    tid = t.source_trace_upload_id
+    if tid:
+        u = session.get(Upload, tid)
+        if u:
+            r.source_upload_original_filename = u.original_filename
+            r.source_stored_file_available = bool(u.stored_path)
+    return r
+
+
+def transactions_to_reads(session: Session, rows: Iterable[Transaction]) -> list[TransactionRead]:
+    txs = list(rows)
+    trace_ids = {t.source_trace_upload_id for t in txs if t.source_trace_upload_id}
+    up_map: dict[int, Upload] = {}
+    if trace_ids:
+        ups = session.exec(select(Upload).where(Upload.id.in_(trace_ids))).all()
+        up_map = {u.id: u for u in ups}
+    out: list[TransactionRead] = []
+    for t in txs:
+        r = TransactionRead.model_validate(t)
+        r.source_cells = _source_cells_from_raw(t.raw_row_data)
+        tid = t.source_trace_upload_id
+        if tid and tid in up_map:
+            u = up_map[tid]
+            r.source_upload_original_filename = u.original_filename
+            r.source_stored_file_available = bool(u.stored_path)
+        out.append(r)
+    return out
+
+
 def _merchant_group_search_clause(q: str | None) -> tuple[str, dict[str, str]]:
     if q and q.strip():
         return (
@@ -63,6 +110,43 @@ WITH grp AS (
   WHERE 1=1 {search_clause}
   GROUP BY lower(trim(t.description))
 )"""
+
+
+def _merchant_groups_main_where_sql(
+    *,
+    approved: bool,
+    category_id: int | None,
+    uncategorized_only: bool,
+    subcategory_id: int | None,
+    missing_subcategory: bool,
+) -> tuple[str, dict[str, Any]]:
+    """Build WHERE clause on grp+tr (after join to representative transaction)."""
+    extra: dict[str, Any] = {}
+    if uncategorized_only:
+        return "tr.category_id IS NULL", extra
+    if category_id is not None:
+        parts = ["tr.category_id = :filter_category_id"]
+        extra["filter_category_id"] = category_id
+        if subcategory_id is not None:
+            parts.append("tr.subcategory_id = :filter_subcategory_id")
+            extra["filter_subcategory_id"] = subcategory_id
+        elif missing_subcategory:
+            parts.append("tr.subcategory_id IS NULL")
+        return " AND ".join(parts), extra
+    approved_int = 1 if approved else 0
+    extra["approved"] = approved_int
+    return (
+        """(
+  (:approved = 0 AND NOT EXISTS (
+    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  ))
+  OR
+  (:approved = 1 AND EXISTS (
+    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  ))
+)""",
+        extra,
+    )
 
 
 def _resolve_merchant_action_pattern_key(
@@ -176,7 +260,7 @@ def get_transactions(
     """List transactions with optional filters, text search, and pagination."""
     if spend_pattern is not None and spend_pattern not in ALLOWED_SPEND_PATTERNS:
         raise HTTPException(422, detail="spend_pattern must be unknown, recurring, or one_time")
-    stmt = select(Transaction).join(Upload)
+    stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id)
 
     if month is not None:
         stmt = stmt.where(Upload.month == month)
@@ -209,7 +293,7 @@ def get_transactions(
     stmt = stmt.order_by(Transaction.id.desc())
     stmt = stmt.offset(offset).limit(limit)
     transactions = session.exec(stmt).all()
-    return [TransactionRead.from_orm(t) for t in transactions]
+    return transactions_to_reads(session, transactions)
 
 
 @router.get("/merchant-groups", response_model=MerchantGroupListResponse)
@@ -220,16 +304,58 @@ def list_merchant_groups(
         description="false = pending (not user-approved), true = approved groups",
     ),
     q: str | None = Query(None, description="Search description or raw row text"),
+    category_id: int | None = Query(
+        None,
+        description="When set, list groups whose representative txn has this category (ignores approved filter).",
+    ),
+    uncategorized_only: bool = Query(
+        False,
+        description="When true, groups with uncategorized representative; ignores approved filter.",
+    ),
+    subcategory_id: int | None = Query(
+        None,
+        description="With category_id, filter representative txn subcategory_id.",
+    ),
+    missing_subcategory: bool = Query(
+        False,
+        description="With category_id, representative has no subcategory (subcategory_id IS NULL).",
+    ),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     """Group all transactions by normalized description (merchant key); filter by user approval."""
+    if uncategorized_only and category_id is not None:
+        raise HTTPException(
+            422,
+            detail="Use either uncategorized_only or category_id, not both",
+        )
+    if subcategory_id is not None and missing_subcategory:
+        raise HTTPException(
+            422,
+            detail="Use either subcategory_id or missing_subcategory, not both",
+        )
+    if (
+        (subcategory_id is not None or missing_subcategory)
+        and category_id is None
+        and not uncategorized_only
+    ):
+        raise HTTPException(
+            422,
+            detail="subcategory filters require category_id or uncategorized_only",
+        )
+
     search_clause, extra_params = _merchant_group_search_clause(q)
     base = _merchant_groups_base_cte(search_clause)
-    approved_int = 1 if approved else 0
+    main_where, filter_params = _merchant_groups_main_where_sql(
+        approved=approved,
+        category_id=category_id,
+        uncategorized_only=uncategorized_only,
+        subcategory_id=subcategory_id,
+        missing_subcategory=missing_subcategory,
+    )
     list_sql = (
         base
-        + """
+        + f"""
 SELECT
   g.pattern_key,
   g.display_description,
@@ -245,42 +371,27 @@ INNER JOIN "transaction" tr ON tr.id = g.representative_transaction_id
 LEFT JOIN merchant_spend_group_member msgm ON msgm.pattern_key = g.pattern_key
 LEFT JOIN merchant_spend_group msg ON msg.id = msgm.group_id
 LEFT JOIN merchant_key_user_approval a ON a.pattern_key = g.pattern_key
-WHERE (
-  (:approved = 0 AND NOT EXISTS (
-    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
-  ))
-  OR
-  (:approved = 1 AND EXISTS (
-    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
-  ))
-)
+WHERE ({main_where})
 ORDER BY g.occurrence_count DESC, g.pattern_key
 LIMIT :limit OFFSET :offset
 """
     )
     count_sql = (
         base
-        + """
+        + f"""
 SELECT COUNT(*) AS n
 FROM grp g
-WHERE (
-  (:approved = 0 AND NOT EXISTS (
-    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
-  ))
-  OR
-  (:approved = 1 AND EXISTS (
-    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
-  ))
-)
+INNER JOIN "transaction" tr ON tr.id = g.representative_transaction_id
+WHERE ({main_where})
 """
     )
     params = {
-        "approved": approved_int,
         "limit": limit,
         "offset": offset,
         **extra_params,
+        **filter_params,
     }
-    count_params = {"approved": approved_int, **extra_params}
+    count_params = {**extra_params, **filter_params}
     total = int(
         session.execute(text(count_sql), count_params).mappings().one()["n"]
     )
@@ -466,7 +577,7 @@ def update_spend_pattern(
     session.add(txn)
     session.commit()
     session.refresh(txn)
-    return TransactionRead.from_orm(txn)
+    return transaction_to_read(session, txn)
 
 
 @router.patch("/{transaction_id}/subcategory", response_model=TransactionRead)
@@ -502,7 +613,7 @@ def patch_transaction_subcategory(
             raise HTTPException(400, detail=str(exc)) from exc
         session.commit()
         session.refresh(txn)
-        return TransactionRead.from_orm(txn)
+        return transaction_to_read(session, txn)
     if body.subcategory_id is None:
         txn.subcategory_id = None
     else:
@@ -518,7 +629,7 @@ def patch_transaction_subcategory(
     session.add(txn)
     session.commit()
     session.refresh(txn)
-    return TransactionRead.from_orm(txn)
+    return transaction_to_read(session, txn)
 
 
 @router.post("/auto-categorize", response_model=AutoCategorizeSummary)
@@ -539,9 +650,11 @@ def auto_categorize(
     Otherwise use POST /transactions/llm-categorize-pending for opt-in AI.
     """
     if force:
-        stmt = select(Transaction).join(Upload).where(Upload.month == month)
+        stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id).where(
+            Upload.month == month
+        )
     else:
-        stmt = select(Transaction).join(Upload).where(
+        stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id).where(
             Upload.month == month,
             _pending_auto_categorize_clause(),
         )
@@ -580,7 +693,7 @@ def llm_categorize_pending(
     _validate_month_ym(month)
     stmt = (
         select(Transaction)
-        .join(Upload)
+        .join(Upload, Transaction.upload_id == Upload.id)
         .where(
             Upload.month == month,
             Transaction.category_id == None,  # noqa: E711
@@ -602,7 +715,7 @@ def auto_categorize_chunk(
     _validate_month_ym(month)
     stmt = (
         select(Transaction)
-        .join(Upload)
+        .join(Upload, Transaction.upload_id == Upload.id)
         .where(Upload.month == month, _pending_auto_categorize_clause())
         .order_by(Transaction.id.asc())
         .limit(limit)
@@ -647,7 +760,7 @@ def get_needs_review(
     """Return transactions flagged for manual review in a given month."""
     stmt = (
         select(Transaction)
-        .join(Upload)
+        .join(Upload, Transaction.upload_id == Upload.id)
         .where(
             Upload.month == month,
             Transaction.needs_review == True,  # noqa: E712
@@ -656,4 +769,4 @@ def get_needs_review(
         .offset(offset)
         .limit(limit)
     )
-    return [TransactionRead.from_orm(t) for t in session.exec(stmt).all()]
+    return transactions_to_reads(session, session.exec(stmt).all())
