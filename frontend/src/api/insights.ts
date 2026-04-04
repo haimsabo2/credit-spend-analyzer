@@ -1,6 +1,7 @@
 import { api } from "./client"
 import type {
   CategoryYearMerchantsResponse,
+  MonthCategorySubcategoriesResponse,
   SummaryResponse,
   TrendsResponse,
 } from "./types"
@@ -53,4 +54,35 @@ export async function getCategoryYearMerchants(
     params.trailing_calendar_months = scope.trailingCalendarMonths
   }
   return api.get<CategoryYearMerchantsResponse>("/insights/category-year-merchants", params)
+}
+
+/** Per-subcategory monthly stacks; unassigned spend uses the parent category name as the slice label. */
+export async function getCategoryYearSubcategories(
+  categoryId: number | null,
+  scope: CategoryMerchantsScope,
+): Promise<CategoryYearMerchantsResponse> {
+  const params: Record<string, string | number | undefined> = {}
+  if (categoryId != null) {
+    params.category_id = categoryId
+  }
+  if ("year" in scope) {
+    params.year = scope.year
+  } else {
+    params.trailing_calendar_months = scope.trailingCalendarMonths
+  }
+  return api.get<CategoryYearMerchantsResponse>("/insights/category-year-subcategories", params)
+}
+
+export async function getMonthCategorySubcategories(
+  month: string,
+  categoryId: number | null,
+): Promise<MonthCategorySubcategoriesResponse> {
+  const params: Record<string, string | number | undefined> = { month }
+  if (categoryId != null) {
+    params.category_id = categoryId
+  }
+  return api.get<MonthCategorySubcategoriesResponse>(
+    "/insights/month-category-subcategories",
+    params,
+  )
 }

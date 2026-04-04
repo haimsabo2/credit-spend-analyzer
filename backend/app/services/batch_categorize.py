@@ -18,6 +18,7 @@ from .categorizer import categorize_transaction as llm_categorize
 from .categorizer import categorize_transactions_batch
 from .categorizer import transaction_llm_dedupe_key
 from .dictionary_rules import dictionary_categorize
+from .merchant_subcategory import apply_approved_subcategory_to_transactions
 from .spend_pattern_refresh import refresh_auto_spend_patterns
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,8 @@ def _run_llm_categorization_core(
             session.commit()
 
     session.commit()
+    apply_approved_subcategory_to_transactions(session, llm_ready)
+    session.commit()
     return categorized, needs_review_count, failed, failures_sample
 
 
@@ -373,6 +376,8 @@ def batch_categorize_transactions(
     else:
         _progress_emit(progress_sink, "classification_local", rows=processed)
 
+    session.commit()
+    apply_approved_subcategory_to_transactions(session, txns)
     session.commit()
     refresh_auto_spend_patterns(session)
 

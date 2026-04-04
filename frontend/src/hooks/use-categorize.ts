@@ -14,6 +14,8 @@ export function useCategorize() {
     onSuccess(data) {
       qc.invalidateQueries({ queryKey: ["transactions"] })
       qc.invalidateQueries({ queryKey: ["needs-review"] })
+      qc.invalidateQueries({ queryKey: ["merchant-groups"] })
+      qc.invalidateQueries({ queryKey: ["subcategories"] })
       qc.invalidateQueries({ queryKey: ["summary"] })
       if (data.backfill_count <= 0) {
         toast.success(t("transactionsTable.categoryUpdated"))

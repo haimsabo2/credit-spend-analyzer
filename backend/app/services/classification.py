@@ -7,7 +7,8 @@ from typing import List, Optional
 
 from sqlmodel import Session, func, select
 
-from ..models import ClassificationRule, Transaction
+from ..models import ClassificationRule, Subcategory, Transaction
+from .merchant_subcategory import sync_approval_subcategory_after_merchant_key_propagate
 
 
 def _matches(rule: ClassificationRule, txn: Transaction) -> bool:
@@ -146,6 +147,14 @@ def upsert_merchant_key_rule_and_propagate(
         t.confidence = 1.0
         t.rule_id_applied = new_rule.id
         t.needs_review = False
+        if t.subcategory_id:
+            sub = session.get(Subcategory, t.subcategory_id)
+            if not sub or sub.category_id != category_id:
+                t.subcategory_id = None
         session.add(t)
+
+    sync_approval_subcategory_after_merchant_key_propagate(
+        session, pat.strip().lower(), category_id, txns
+    )
 
     return new_rule, len(txns)

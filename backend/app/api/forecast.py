@@ -30,13 +30,16 @@ def get_forecast(
                    COUNT(DISTINCT month) AS months_present,
                    AVG(month_total)      AS avg_amount
             FROM (
-                SELECT t.description AS merchant_key,
+                SELECT COALESCE(g.display_name, lower(trim(t.description))) AS merchant_key,
                        u.month,
                        SUM(t.amount) AS month_total
                 FROM   "transaction" t
                 JOIN   upload u ON t.upload_id = u.id
+                LEFT JOIN merchant_spend_group_member m
+                       ON lower(trim(t.description)) = m.pattern_key
+                LEFT JOIN merchant_spend_group g ON m.group_id = g.id
                 WHERE  u.month IN ({months})
-                GROUP  BY t.description, u.month
+                GROUP  BY COALESCE(g.display_name, lower(trim(t.description))), u.month
             ) sub
             GROUP  BY merchant_key
             HAVING months_present >= 3

@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, text
 from sqlmodel import Session, func, select
 
 from ..dependencies import SessionDep
-from ..models import Transaction, Upload
+from ..models import MerchantKeyUserApproval, Subcategory, Transaction, Upload
 from ..schemas import (
     AutoCategorizeChunkResponse,
     AutoCategorizeSummary,
@@ -15,20 +15,90 @@ from ..schemas import (
     CategorizeRequest,
     CategorizeResponse,
     LlmPendingCountResponse,
+    MerchantGroupActionBody,
+    MerchantGroupActionResponse,
+    MerchantGroupListResponse,
+    MerchantGroupRow,
     SpendPatternUpdate,
     TransactionRead,
+    TransactionSubcategoryPatch,
 )
 from ..services.batch_categorize import (
     REASON_PENDING_MANUAL_OR_AI,
     batch_categorize_transactions,
     llm_categorize_transactions,
 )
+from ..services.merchant_subcategory import apply_merchant_subcategory_preference
 from ..services.spend_pattern import ALLOWED_SPEND_PATTERNS
 from ..services.classification import upsert_merchant_key_rule_and_propagate
+from ..utils import normalize_merchant_pattern_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _merchant_group_search_clause(q: str | None) -> tuple[str, dict[str, str]]:
+    if q and q.strip():
+        return (
+            " AND (t.description LIKE :q_like OR COALESCE(t.raw_row_data, '') LIKE :q_like)",
+            {"q_like": f"%{q.strip()}%"},
+        )
+    return "", {}
+
+
+def _merchant_groups_base_cte(search_clause: str) -> str:
+    # "transaction" is quoted — reserved word in SQLite.
+    return f"""
+WITH grp AS (
+  SELECT
+    lower(trim(t.description)) AS pattern_key,
+    MIN(t.description) AS display_description,
+    COUNT(*) AS occurrence_count,
+    SUM(t.amount) AS total_amount,
+    MAX(t.id) AS representative_transaction_id,
+    MAX(CASE WHEN t.needs_review THEN 1 ELSE 0 END) AS needs_review_int
+  FROM "transaction" t
+  INNER JOIN upload u ON t.upload_id = u.id
+  WHERE 1=1 {search_clause}
+  GROUP BY lower(trim(t.description))
+)"""
+
+
+def _resolve_merchant_action_pattern_key(
+    session: Session, body: MerchantGroupActionBody
+) -> str:
+    has_tid = body.transaction_id is not None
+    pk_raw = (body.pattern_key or "").strip()
+    has_pk = bool(pk_raw)
+    if has_tid and has_pk:
+        raise HTTPException(
+            422, detail="Provide only one of transaction_id or pattern_key"
+        )
+    if not has_tid and not has_pk:
+        raise HTTPException(
+            422, detail="Provide transaction_id or pattern_key"
+        )
+    if has_tid:
+        assert body.transaction_id is not None
+        txn = session.get(Transaction, body.transaction_id)
+        if not txn:
+            raise HTTPException(404, detail="Transaction not found")
+        return normalize_merchant_pattern_key(txn.description)
+    return normalize_merchant_pattern_key(pk_raw)
+
+
+def _representative_transaction_for_pattern(
+    session: Session, pattern_key: str
+) -> Transaction | None:
+    pk = normalize_merchant_pattern_key(pattern_key)
+    stmt = (
+        select(Transaction)
+        .where(func.lower(func.trim(Transaction.description)) == pk)
+        .order_by(Transaction.id.desc())
+        .limit(1)
+    )
+    return session.exec(stmt).first()
 
 
 def _validate_month_ym(month: str) -> None:
@@ -92,6 +162,7 @@ def get_transactions(
         description="true = uncategorized (category_id IS NULL), false = categorized",
     ),
     category_id: int | None = Query(None, description="Filter by category id"),
+    subcategory_id: int | None = Query(None, description="Filter by subcategory id"),
     q: str | None = Query(None, description="Search merchant/details text"),
     amount_min: float | None = Query(None, description="Minimum amount inclusive"),
     amount_max: float | None = Query(None, description="Maximum amount inclusive"),
@@ -119,6 +190,8 @@ def get_transactions(
         stmt = stmt.where(Transaction.category_id != None)  # noqa: E711
     if category_id is not None:
         stmt = stmt.where(Transaction.category_id == category_id)
+    if subcategory_id is not None:
+        stmt = stmt.where(Transaction.subcategory_id == subcategory_id)
     if amount_min is not None:
         stmt = stmt.where(Transaction.amount >= amount_min)
     if amount_max is not None:
@@ -139,6 +212,200 @@ def get_transactions(
     return [TransactionRead.from_orm(t) for t in transactions]
 
 
+@router.get("/merchant-groups", response_model=MerchantGroupListResponse)
+def list_merchant_groups(
+    session: SessionDep,
+    approved: bool = Query(
+        False,
+        description="false = pending (not user-approved), true = approved groups",
+    ),
+    q: str | None = Query(None, description="Search description or raw row text"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Group all transactions by normalized description (merchant key); filter by user approval."""
+    search_clause, extra_params = _merchant_group_search_clause(q)
+    base = _merchant_groups_base_cte(search_clause)
+    approved_int = 1 if approved else 0
+    list_sql = (
+        base
+        + """
+SELECT
+  g.pattern_key,
+  g.display_description,
+  g.occurrence_count,
+  g.total_amount,
+  g.representative_transaction_id,
+  tr.category_id AS category_id,
+  g.needs_review_int AS needs_review_any,
+  msg.display_name AS spend_group_name,
+  a.subcategory_id AS subcategory_id
+FROM grp g
+INNER JOIN "transaction" tr ON tr.id = g.representative_transaction_id
+LEFT JOIN merchant_spend_group_member msgm ON msgm.pattern_key = g.pattern_key
+LEFT JOIN merchant_spend_group msg ON msg.id = msgm.group_id
+LEFT JOIN merchant_key_user_approval a ON a.pattern_key = g.pattern_key
+WHERE (
+  (:approved = 0 AND NOT EXISTS (
+    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  ))
+  OR
+  (:approved = 1 AND EXISTS (
+    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  ))
+)
+ORDER BY g.occurrence_count DESC, g.pattern_key
+LIMIT :limit OFFSET :offset
+"""
+    )
+    count_sql = (
+        base
+        + """
+SELECT COUNT(*) AS n
+FROM grp g
+WHERE (
+  (:approved = 0 AND NOT EXISTS (
+    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  ))
+  OR
+  (:approved = 1 AND EXISTS (
+    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  ))
+)
+"""
+    )
+    params = {
+        "approved": approved_int,
+        "limit": limit,
+        "offset": offset,
+        **extra_params,
+    }
+    count_params = {"approved": approved_int, **extra_params}
+    total = int(
+        session.execute(text(count_sql), count_params).mappings().one()["n"]
+    )
+    rows = session.execute(text(list_sql), params).mappings().all()
+    items = [
+        MerchantGroupRow(
+            pattern_key=r["pattern_key"],
+            display_description=r["display_description"],
+            occurrence_count=int(r["occurrence_count"]),
+            total_amount=float(r["total_amount"]),
+            representative_transaction_id=int(r["representative_transaction_id"]),
+            category_id=r["category_id"],
+            subcategory_id=r["subcategory_id"],
+            needs_review_any=bool(r["needs_review_any"]),
+            spend_group_name=r["spend_group_name"],
+        )
+        for r in rows
+    ]
+    return MerchantGroupListResponse(items=items, total=total)
+
+
+@router.post("/merchant-groups/approve", response_model=MerchantGroupActionResponse)
+def approve_merchant_group(
+    session: SessionDep,
+    body: MerchantGroupActionBody,
+):
+    pattern_key = _resolve_merchant_action_pattern_key(session, body)
+    existing = session.exec(
+        select(MerchantKeyUserApproval).where(
+            MerchantKeyUserApproval.pattern_key == pattern_key
+        )
+    ).first()
+    if not existing:
+        session.add(MerchantKeyUserApproval(pattern_key=pattern_key))
+        session.flush()
+    approval = session.exec(
+        select(MerchantKeyUserApproval).where(
+            MerchantKeyUserApproval.pattern_key == pattern_key
+        )
+    ).first()
+    assert approval is not None
+    if body.subcategory_id is not None:
+        sub = session.get(Subcategory, body.subcategory_id)
+        if not sub:
+            raise HTTPException(404, detail="Subcategory not found")
+        rep = _representative_transaction_for_pattern(session, pattern_key)
+        if rep is None or rep.category_id is None:
+            raise HTTPException(
+                422,
+                detail="Cannot set subcategory: no categorized transaction for this merchant",
+            )
+        if sub.category_id != rep.category_id:
+            raise HTTPException(
+                422,
+                detail="Subcategory must belong to the merchant group's category",
+            )
+        try:
+            apply_merchant_subcategory_preference(
+                session, pattern_key, body.subcategory_id, approval=approval
+            )
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+    session.commit()
+    return MerchantGroupActionResponse(pattern_key=pattern_key)
+
+
+@router.post("/merchant-groups/subcategory", response_model=MerchantGroupActionResponse)
+def set_merchant_group_subcategory(
+    session: SessionDep,
+    body: MerchantGroupActionBody,
+):
+    """Set or clear preferred subcategory for an approved merchant (all matching rows)."""
+    pattern_key = _resolve_merchant_action_pattern_key(session, body)
+    approval = session.exec(
+        select(MerchantKeyUserApproval).where(
+            MerchantKeyUserApproval.pattern_key == pattern_key
+        )
+    ).first()
+    if not approval:
+        raise HTTPException(
+            409,
+            detail="Merchant must be approved before setting a subcategory preference",
+        )
+    if body.subcategory_id is not None:
+        sub = session.get(Subcategory, body.subcategory_id)
+        if not sub:
+            raise HTTPException(404, detail="Subcategory not found")
+        rep = _representative_transaction_for_pattern(session, pattern_key)
+        if rep is None or rep.category_id is None:
+            raise HTTPException(
+                422,
+                detail="Cannot set subcategory: no categorized transaction for this merchant",
+            )
+        if sub.category_id != rep.category_id:
+            raise HTTPException(
+                422,
+                detail="Subcategory must belong to the merchant group's category",
+            )
+    try:
+        apply_merchant_subcategory_preference(
+            session, pattern_key, body.subcategory_id, approval=approval
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    session.commit()
+    return MerchantGroupActionResponse(pattern_key=pattern_key)
+
+
+@router.post("/merchant-groups/unapprove", response_model=MerchantGroupActionResponse)
+def unapprove_merchant_group(
+    session: SessionDep,
+    body: MerchantGroupActionBody,
+):
+    pattern_key = _resolve_merchant_action_pattern_key(session, body)
+    row = session.exec(
+        select(MerchantKeyUserApproval).where(
+            MerchantKeyUserApproval.pattern_key == pattern_key
+        )
+    ).first()
+    if row:
+        session.delete(row)
+    session.commit()
+    return MerchantGroupActionResponse(pattern_key=pattern_key)
+
+
 @router.post("/{transaction_id}/categorize", response_model=CategorizeResponse)
 def categorize_transaction(
     transaction_id: int,
@@ -150,6 +417,10 @@ def categorize_transaction(
         raise HTTPException(404, detail="Transaction not found")
 
     txn.category_id = body.category_id
+    if txn.subcategory_id:
+        sub = session.get(Subcategory, txn.subcategory_id)
+        if not sub or sub.category_id != body.category_id:
+            txn.subcategory_id = None
     txn.confidence = 1.0
     txn.needs_review = False
     session.add(txn)
@@ -192,6 +463,58 @@ def update_spend_pattern(
         raise HTTPException(404, detail="Transaction not found")
     txn.spend_pattern = body.spend_pattern
     txn.spend_pattern_user_set = True
+    session.add(txn)
+    session.commit()
+    session.refresh(txn)
+    return TransactionRead.from_orm(txn)
+
+
+@router.patch("/{transaction_id}/subcategory", response_model=TransactionRead)
+def patch_transaction_subcategory(
+    transaction_id: int,
+    body: TransactionSubcategoryPatch,
+    session: SessionDep,
+):
+    txn = session.get(Transaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, detail="Transaction not found")
+    pk = normalize_merchant_pattern_key(txn.description)
+    approval = session.exec(
+        select(MerchantKeyUserApproval).where(
+            MerchantKeyUserApproval.pattern_key == pk
+        )
+    ).first()
+    if approval:
+        if body.subcategory_id is not None:
+            sub = session.get(Subcategory, body.subcategory_id)
+            if not sub:
+                raise HTTPException(404, detail="Subcategory not found")
+            if txn.category_id is None or sub.category_id != txn.category_id:
+                raise HTTPException(
+                    422,
+                    detail="Subcategory must belong to the transaction's category",
+                )
+        try:
+            apply_merchant_subcategory_preference(
+                session, pk, body.subcategory_id, approval=approval
+            )
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+        session.commit()
+        session.refresh(txn)
+        return TransactionRead.from_orm(txn)
+    if body.subcategory_id is None:
+        txn.subcategory_id = None
+    else:
+        sub = session.get(Subcategory, body.subcategory_id)
+        if not sub:
+            raise HTTPException(404, detail="Subcategory not found")
+        if txn.category_id is None or sub.category_id != txn.category_id:
+            raise HTTPException(
+                422,
+                detail="Subcategory must belong to the transaction's category",
+            )
+        txn.subcategory_id = body.subcategory_id
     session.add(txn)
     session.commit()
     session.refresh(txn)

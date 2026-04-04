@@ -9,6 +9,8 @@ import {
   Cell,
   BarChart,
   Bar,
+  ComposedChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -17,8 +19,10 @@ import {
   LabelList,
 } from "recharts"
 import { Upload } from "lucide-react"
+import { AnnualSpendMomLabels } from "@/components/dashboard/annual-spend-mom-labels"
 import { CategoryYearCarousel } from "@/components/dashboard/category-year-carousel"
 import { CategoryYearDrilldownDialog } from "@/components/dashboard/category-year-drilldown-dialog"
+import { MonthPieSubcategoryDrilldown } from "@/components/dashboard/month-pie-subcategory-drilldown"
 import { CategoryYearOverviewGrouped } from "@/components/dashboard/category-year-overview-grouped"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ChartCard } from "@/components/dashboard/chart-card"
@@ -72,6 +76,25 @@ const MIN_DASHBOARD_YEAR = 2020
 
 /** Select value for trailing 12 calendar months (not a calendar year). */
 const PERIOD_TRAILING12 = "__trailing12__"
+
+type AnnualChartRow = {
+  ym: string
+  label: string
+  total: number
+  count: number
+  /** Month-over-month % change in total spend; null if previous month was 0 or first slot. */
+  momPctChange: number | null
+}
+
+function monthOverMonthPctChange(prevTotal: number, currTotal: number): number | null {
+  if (prevTotal <= 0) return null
+  return ((currTotal - prevTotal) / prevTotal) * 100
+}
+
+function formatMomPctForDisplay(pct: number): string {
+  const sign = pct > 0 ? "+" : ""
+  return `${sign}${pct.toFixed(1)}%`
+}
 
 function yearSelectOptions(): number[] {
   const cy = new Date().getFullYear()
@@ -187,6 +210,9 @@ export default function DashboardPage() {
     }
     const y = selectedCalendarYear
     if (y == null || !Number.isFinite(y)) return []
+    if (yearTrends?.months?.length) {
+      return yearTrends.months.filter((m) => m.startsWith(`${y}-`))
+    }
     return Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, "0")}`)
   }, [isTrailing12, yearTrends?.months, selectedCalendarYear])
 
@@ -196,9 +222,27 @@ export default function DashboardPage() {
     setStoreMonth(yearTrends.months[yearTrends.months.length - 1]!)
   }, [isTrailing12, yearTrends?.months, selectedMonth, setStoreMonth])
 
+  useEffect(() => {
+    if (isTrailing12 || !yearTrends?.months?.length || selectedCalendarYear == null) return
+    const prefix = `${selectedCalendarYear}-`
+    if (!yearTrends.months.some((m) => m.startsWith(prefix))) return
+    if (yearTrends.months.includes(selectedMonth)) return
+    setStoreMonth(yearTrends.months[yearTrends.months.length - 1]!)
+  }, [
+    isTrailing12,
+    yearTrends?.months,
+    selectedMonth,
+    setStoreMonth,
+    selectedCalendarYear,
+  ])
+
   const categoryMonthlyRows = yearTrends?.category_monthly
 
   const [categoryDrilldownRow, setCategoryDrilldownRow] = useState<CategoryMonthlyRow | null>(null)
+  const [monthPieDrill, setMonthPieDrill] = useState<{
+    categoryId: number | null
+    categoryName: string
+  } | null>(null)
 
   const { data: transactions } = useQuery({
     queryKey: ["transactions", selectedMonth],
@@ -214,29 +258,53 @@ export default function DashboardPage() {
     return aggregateByDay(transactions, selectedMonth)
   }, [transactions, selectedMonth])
 
-  const pieData = useMemo(() => {
+  type PieSlice = {
+    name: string
+    value: number
+    categoryId: number | null
+    isOther: boolean
+  }
+
+  const pieData = useMemo((): PieSlice[] => {
     if (!effectiveSummary?.spend_by_category) return []
     const cats = effectiveSummary.spend_by_category.filter((c) => c.amount > 0)
     const top = cats.slice(0, TOP_CATEGORIES)
     const rest = cats.slice(TOP_CATEGORIES)
     const restAmount = rest.reduce((s, c) => s + c.amount, 0)
-    const result = top.map((c) => ({ name: c.category_name, value: c.amount }))
+    const result: PieSlice[] = top.map((c) => ({
+      name: c.category_name,
+      value: c.amount,
+      categoryId: c.category_id,
+      isOther: false,
+    }))
     if (restAmount > 0) {
-      result.push({ name: t("charts.other"), value: restAmount })
+      result.push({
+        name: t("charts.other"),
+        value: restAmount,
+        categoryId: null,
+        isOther: true,
+      })
     }
     return result
   }, [effectiveSummary, t])
 
   const pieTotal = useMemo(() => pieData.reduce((s, x) => s + x.value, 0), [pieData])
 
-  const annualChartData = useMemo(() => {
+  const annualChartData = useMemo((): AnnualChartRow[] => {
     if (!yearTrends?.months?.length) return []
-    return yearTrends.months.map((ym, i) => ({
-      ym,
-      label: formatMonthShort(ym),
-      total: yearTrends.total_spend_series[i] ?? 0,
-      count: yearTrends.txn_count_series?.[i] ?? 0,
-    }))
+    return yearTrends.months.map((ym, i) => {
+      const total = yearTrends.total_spend_series[i] ?? 0
+      const prevTotal = i > 0 ? (yearTrends.total_spend_series[i - 1] ?? 0) : 0
+      const momPctChange =
+        i > 0 ? monthOverMonthPctChange(prevTotal, total) : null
+      return {
+        ym,
+        label: formatMonthShort(ym),
+        total,
+        count: yearTrends.txn_count_series?.[i] ?? 0,
+        momPctChange,
+      }
+    })
   }, [yearTrends])
 
   /** Nice Y max with headroom so bars use more vertical space and top labels fit. */
@@ -365,10 +433,11 @@ export default function DashboardPage() {
             ) : annualChartData.length > 0 ? (
               <div className="space-y-4">
                 <p className="text-muted-foreground text-xs">{t("dashboard.clickMonthHint")}</p>
+                <p className="text-muted-foreground text-xs">{t("dashboard.annualOverviewTrendHint")}</p>
                 <ResponsiveContainer width="100%" height={360}>
-                  <BarChart
+                  <ComposedChart
                     data={annualChartData}
-                    margin={{ top: 32, right: 12, left: 4, bottom: 8 }}
+                    margin={{ top: 40, right: 12, left: 4, bottom: 8 }}
                     barCategoryGap="18%"
                   >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -380,12 +449,40 @@ export default function DashboardPage() {
                       tickFormatter={(v) => `${currencySymbol}${v}`}
                     />
                     <Tooltip
-                      formatter={(v: number | undefined, _n, p) => {
-                        const payload = p?.payload as { count?: number } | undefined
-                        const c = payload?.count
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload?.length) return null
+                        const row = payload[0].payload as AnnualChartRow
+                        const c = row.count
                         const tx =
-                          c != null && c > 0 ? t("dashboard.tooltipTxnSuffix", { count: c }) : ""
-                        return [`${formatCurrency(v ?? 0, currency)}${tx}`, t("dashboard.monthTableSpend")]
+                          c != null && c > 0
+                            ? t("dashboard.tooltipTxnSuffix", { count: c })
+                            : ""
+                        const mom = row.momPctChange
+                        return (
+                          <div className="rounded-md border bg-background/95 px-2 py-1.5 text-xs shadow-md">
+                            <p className="font-medium text-foreground">{label}</p>
+                            <p className="text-muted-foreground">
+                              {t("dashboard.monthTableSpend")}:{" "}
+                              {formatCurrency(row.total, currency)}
+                              {tx}
+                            </p>
+                            {mom != null && Number.isFinite(mom) ? (
+                              <p
+                                className={
+                                  mom > 0
+                                    ? "text-destructive"
+                                    : mom < 0
+                                      ? "text-emerald-600 dark:text-emerald-500"
+                                      : "text-muted-foreground"
+                                }
+                              >
+                                {t("dashboard.annualMomVsPrev", {
+                                  value: formatMomPctForDisplay(mom),
+                                })}
+                              </p>
+                            ) : null}
+                          </div>
+                        )
                       }}
                     />
                     <Bar
@@ -426,7 +523,17 @@ export default function DashboardPage() {
                         }}
                       />
                     </Bar>
-                  </BarChart>
+                    <Line
+                      type="monotone"
+                      dataKey="total"
+                      stroke="var(--color-chart-2)"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: "var(--color-chart-2)" }}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={false}
+                    />
+                    <AnnualSpendMomLabels rows={annualChartData} formatPct={formatMomPctForDisplay} />
+                  </ComposedChart>
                 </ResponsiveContainer>
                 <div className="rounded-md border">
                   <Table>
@@ -633,6 +740,14 @@ export default function DashboardPage() {
                           labelLine={false}
                           stroke="var(--background)"
                           strokeWidth={2}
+                          cursor="pointer"
+                          onClick={(d: PieSlice) => {
+                            if (d?.isOther) return
+                            setMonthPieDrill({
+                              categoryId: d.categoryId,
+                              categoryName: d.name,
+                            })
+                          }}
                         >
                           {pieData.map((_, i) => (
                             <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
@@ -671,9 +786,20 @@ export default function DashboardPage() {
                           />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
-                              <span className="break-words font-medium leading-snug text-foreground">
+                              <button
+                                type="button"
+                                className="break-words text-start font-medium leading-snug text-foreground underline-offset-2 hover:underline disabled:no-underline disabled:opacity-100"
+                                disabled={entry.isOther}
+                                onClick={() => {
+                                  if (entry.isOther) return
+                                  setMonthPieDrill({
+                                    categoryId: entry.categoryId,
+                                    categoryName: entry.name,
+                                  })
+                                }}
+                              >
                                 {entry.name}
-                              </span>
+                              </button>
                               <span className="shrink-0 tabular-nums text-muted-foreground sm:text-end">
                                 {formatCurrency(entry.value, currency)}
                                 <span className="ms-1 text-xs">({pct.toFixed(0)}%)</span>
@@ -690,6 +816,11 @@ export default function DashboardPage() {
                   —
                 </p>
               )}
+              {!summaryLoading && pieData.length > 0 ? (
+                <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+                  {t("dashboard.monthPieSubcategoryClickHint")}
+                </p>
+              ) : null}
             </ChartCard>
 
             <ChartCard title={t("charts.byDay")}>
@@ -713,6 +844,17 @@ export default function DashboardPage() {
             </ChartCard>
           </div>
           </div>
+          <MonthPieSubcategoryDrilldown
+            open={monthPieDrill != null}
+            onOpenChange={(open) => {
+              if (!open) setMonthPieDrill(null)
+            }}
+            month={selectedMonth}
+            categoryId={monthPieDrill?.categoryId ?? null}
+            categoryName={monthPieDrill?.categoryName ?? ""}
+            currency={currency}
+            currencySymbol={currencySymbol}
+          />
         </>
       )}
     </div>

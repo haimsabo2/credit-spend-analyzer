@@ -3,6 +3,7 @@ import type { TFunction } from "i18next"
 import type { TransactionRead } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { CategoryCell } from "./category-cell"
+import { SubcategoryCell } from "./subcategory-cell"
 import { SpendPatternCell } from "./spend-pattern-cell"
 import { formatCurrency } from "@/lib/format"
 import { formatTransactionTableDate } from "@/utils/format"
@@ -30,11 +31,18 @@ function SortHeader({
   )
 }
 
-export function getTransactionColumns(t: TFunction): ColumnDef<TransactionRead>[] {
+export function getTransactionColumns(
+  t: TFunction,
+  options?: { plainHeaders?: boolean },
+): ColumnDef<TransactionRead>[] {
+  const plain = options?.plainHeaders === true
   return [
     {
       accessorKey: "posted_at",
-      header: ({ column }) => <SortHeader column={column} label={t("transactionsTable.colDate")} />,
+      header: plain
+        ? t("transactionsTable.colDate")
+        : ({ column }) => <SortHeader column={column} label={t("transactionsTable.colDate")} />,
+      enableSorting: !plain,
       cell: ({ getValue }) => {
         const v = getValue<string | null>()
         if (!v) return <span className="text-muted-foreground">--</span>
@@ -44,9 +52,12 @@ export function getTransactionColumns(t: TFunction): ColumnDef<TransactionRead>[
     },
     {
       accessorKey: "description",
-      header: ({ column }) => (
-        <SortHeader column={column} label={t("transactionsTable.colDescription")} />
-      ),
+      header: plain
+        ? t("transactionsTable.colDescription")
+        : ({ column }) => (
+            <SortHeader column={column} label={t("transactionsTable.colDescription")} />
+          ),
+      enableSorting: !plain,
       cell: ({ getValue }) => (
         <span className="block max-w-[260px] truncate" title={getValue<string>()}>
           {getValue<string>()}
@@ -56,7 +67,10 @@ export function getTransactionColumns(t: TFunction): ColumnDef<TransactionRead>[
     },
     {
       accessorKey: "amount",
-      header: ({ column }) => <SortHeader column={column} label={t("transactionsTable.colAmount")} />,
+      header: plain
+        ? t("transactionsTable.colAmount")
+        : ({ column }) => <SortHeader column={column} label={t("transactionsTable.colAmount")} />,
+      enableSorting: !plain,
       cell: ({ getValue }) => (
         <span className="tabular-nums font-medium">{formatCurrency(getValue<number>())}</span>
       ),
@@ -88,6 +102,13 @@ export function getTransactionColumns(t: TFunction): ColumnDef<TransactionRead>[
       header: t("transactionsTable.colCategory"),
       cell: ({ row }) => <CategoryCell transaction={row.original} />,
       size: 160,
+      enableSorting: false,
+    },
+    {
+      id: "subcategory",
+      header: t("transactionsTable.colSubcategory"),
+      cell: ({ row }) => <SubcategoryCell transaction={row.original} />,
+      size: 140,
       enableSorting: false,
     },
     {

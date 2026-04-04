@@ -9,6 +9,7 @@ export interface Transaction {
   currency: string | null
   needs_review: boolean
   category_id: number | null
+  subcategory_id?: number | null
   confidence: number
   rule_id_applied: number | null
   reason_he?: string | null
@@ -78,6 +79,10 @@ export interface MerchantMonthlySeries {
 export interface CategoryYearMerchantsResponse {
   months: string[]
   merchants: MerchantMonthlySeries[]
+}
+
+export interface MonthCategorySubcategoriesResponse {
+  items: { label: string; amount: number }[]
 }
 
 export interface UploadRead {

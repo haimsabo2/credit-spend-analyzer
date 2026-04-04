@@ -9,6 +9,7 @@ import UploadPage from "@/pages/upload"
 import MonthsPage from "@/pages/months"
 import TransactionsPage from "@/pages/transactions"
 import NeedsReviewPage from "@/pages/needs-review"
+import MerchantSpendGroupsPage from "@/pages/merchant-spend-groups"
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="months" element={<MonthsPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="review" element={<NeedsReviewPage />} />
+            <Route path="merchant-spend-groups" element={<MerchantSpendGroupsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

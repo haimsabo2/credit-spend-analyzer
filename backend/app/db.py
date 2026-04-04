@@ -99,6 +99,50 @@ def _migrate_transaction_spend_pattern_columns() -> None:
             conn.execute(text(sql))
 
 
+def _migrate_merchant_key_user_approval_subcategory() -> None:
+    """Add subcategory_id to merchant_key_user_approval for existing DBs."""
+    from .models import MerchantKeyUserApproval
+
+    try:
+        inspector = sa_inspect(engine)
+    except Exception:
+        return
+    tname = MerchantKeyUserApproval.__tablename__
+    if not inspector.has_table(tname):
+        return
+    cols = {c["name"] for c in inspector.get_columns(tname)}
+    if "subcategory_id" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f'ALTER TABLE "{tname}" ADD COLUMN subcategory_id INTEGER REFERENCES subcategory(id)'
+            )
+        )
+
+
+def _migrate_transaction_subcategory_column() -> None:
+    """Add subcategory_id to transaction for existing DBs."""
+    from .models import Transaction
+
+    try:
+        inspector = sa_inspect(engine)
+    except Exception:
+        return
+    tname = Transaction.__tablename__
+    if not inspector.has_table(tname):
+        return
+    cols = {c["name"] for c in inspector.get_columns(tname)}
+    if "subcategory_id" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f'ALTER TABLE "{tname}" ADD COLUMN subcategory_id INTEGER REFERENCES subcategory(id)'
+            )
+        )
+
+
 def init_db() -> None:
     """Create database tables for all SQLModel models."""
     from . import models  # noqa: F401
@@ -106,6 +150,8 @@ def init_db() -> None:
 
     SQLModel.metadata.create_all(engine)
     _migrate_transaction_spend_pattern_columns()
+    _migrate_transaction_subcategory_column()
+    _migrate_merchant_key_user_approval_subcategory()
     with Session(engine) as session:
         ensure_seed_categories(session)
 

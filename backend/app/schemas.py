@@ -73,6 +73,7 @@ class TransactionRead(SQLModel):
     currency: Optional[str]
     needs_review: bool
     category_id: Optional[int]
+    subcategory_id: Optional[int] = None
     confidence: float
     rule_id_applied: Optional[int]
     reason_he: Optional[str] = None
@@ -86,6 +87,37 @@ class TransactionRead(SQLModel):
     @classmethod
     def _normalize_currency(cls, v: Optional[str]) -> Optional[str]:
         return normalize_currency_code(v)
+
+
+class MerchantGroupRow(SQLModel):
+    """One row per normalized merchant description across all uploads."""
+
+    pattern_key: str
+    display_description: str
+    occurrence_count: int
+    total_amount: float
+    representative_transaction_id: int
+    category_id: Optional[int] = None
+    subcategory_id: Optional[int] = None
+    needs_review_any: bool = False
+    spend_group_name: Optional[str] = None
+
+
+class MerchantGroupListResponse(SQLModel):
+    items: List[MerchantGroupRow]
+    total: int
+
+
+class MerchantGroupActionBody(SQLModel):
+    """Exactly one of transaction_id or pattern_key must be sent."""
+
+    transaction_id: Optional[int] = None
+    pattern_key: Optional[str] = None
+    subcategory_id: Optional[int] = None
+
+
+class MerchantGroupActionResponse(SQLModel):
+    pattern_key: str
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +231,19 @@ class CategoryYearMerchantsResponse(SQLModel):
     merchants: List[MerchantMonthlySeries]
 
 
+class SubcategoryMonthSlice(SQLModel):
+    """Label is subcategory name, or the parent category name when subcategory_id is null."""
+
+    label: str
+    amount: float
+
+
+class MonthCategorySubcategoriesResponse(SQLModel):
+    """Single-month spend within one category, broken down by subcategory (or category name for unassigned)."""
+
+    items: List[SubcategoryMonthSlice]
+
+
 class AnomalyItem(SQLModel):
     type: str
     name: str
@@ -274,6 +319,66 @@ class CategoryRead(SQLModel):
 class CategoryCreate(SQLModel):
     name: str
     description: Optional[str] = None
+
+
+class SubcategoryRead(SQLModel):
+    id: int
+    category_id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class SubcategoryCreate(SQLModel):
+    name: str
+
+
+class SubcategoryUpdate(SQLModel):
+    name: str
+
+
+class TransactionSubcategoryPatch(SQLModel):
+    subcategory_id: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Merchant spend group (rollup) schemas
+# ---------------------------------------------------------------------------
+
+
+class MerchantSpendGroupRead(SQLModel):
+    id: int
+    display_name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MerchantSpendGroupCreate(SQLModel):
+    display_name: str
+
+
+class MerchantSpendGroupUpdate(SQLModel):
+    display_name: str
+
+
+class MerchantSpendGroupMemberRead(SQLModel):
+    id: int
+    group_id: int
+    pattern_key: str
+
+    model_config = {"from_attributes": True}
+
+
+class MerchantSpendGroupMemberCreate(SQLModel):
+    pattern_key: str
+
+
+class MerchantGroupSeriesResponse(SQLModel):
+    """Monthly totals for one spend group over a period (aligned months)."""
+
+    months: List[str]
+    amounts: List[float]
 
 
 # ---------------------------------------------------------------------------

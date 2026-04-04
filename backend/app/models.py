@@ -43,6 +43,19 @@ class Category(CategoryBase, table=True):
     transactions: List["Transaction"] = Relationship(back_populates="category")
     rules: List["ClassificationRule"] = Relationship(back_populates="category")
     budgets: List["Budget"] = Relationship(back_populates="category")
+    subcategories: List["Subcategory"] = Relationship(back_populates="category")
+
+
+class Subcategory(SQLModel, table=True):
+    """Optional finer label under a category (e.g. fruits under groceries)."""
+
+    __table_args__ = (UniqueConstraint("category_id", "name"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    category_id: int = Field(foreign_key="category.id", index=True)
+    name: str = Field(index=True)
+
+    category: Optional["Category"] = Relationship(back_populates="subcategories")
 
 
 class TransactionBase(SQLModel):
@@ -109,6 +122,11 @@ class Transaction(TransactionBase, table=True):
         foreign_key="category.id",
         index=True,
     )
+    subcategory_id: Optional[int] = Field(
+        default=None,
+        foreign_key="subcategory.id",
+        index=True,
+    )
     rule_id_applied: Optional[int] = Field(
         default=None,
         foreign_key="classificationrule.id",
@@ -117,6 +135,57 @@ class Transaction(TransactionBase, table=True):
 
     upload: Optional[Upload] = Relationship(back_populates="transactions")
     category: Optional[Category] = Relationship(back_populates="transactions")
+    subcategory: Optional["Subcategory"] = Relationship()
+
+
+class MerchantSpendGroup(SQLModel, table=True):
+    """User-defined label merging several statement lines (normalized pattern_key)."""
+
+    __tablename__ = "merchant_spend_group"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    display_name: str = Field(index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    members: List["MerchantSpendGroupMember"] = Relationship(
+        back_populates="group",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class MerchantSpendGroupMember(SQLModel, table=True):
+    __tablename__ = "merchant_spend_group_member"
+    __table_args__ = (UniqueConstraint("pattern_key"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    group_id: int = Field(foreign_key="merchant_spend_group.id", index=True)
+    pattern_key: str = Field(
+        index=True,
+        unique=True,
+        description="lower(trim(description)); each key at most one group",
+    )
+
+    group: Optional[MerchantSpendGroup] = Relationship(back_populates="members")
+
+
+class MerchantKeyUserApproval(SQLModel, table=True):
+    """User marked this normalized description key as reviewed (category OK or fixed)."""
+
+    __tablename__ = "merchant_key_user_approval"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    pattern_key: str = Field(
+        index=True,
+        unique=True,
+        description="lower(trim(description)) matching merchant_key rules",
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    subcategory_id: Optional[int] = Field(
+        default=None,
+        foreign_key="subcategory.id",
+        index=True,
+        description="Preferred subcategory for all transactions with this pattern when category matches",
+    )
 
 
 class BudgetBase(SQLModel):

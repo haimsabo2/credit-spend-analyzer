@@ -54,4 +54,10 @@ export const api = {
   post<T>(path: string, body?: unknown, params?: Record<string, string | number | boolean | undefined>) {
     return request<T>("POST", BASE + path, { body, params })
   },
+  patch<T>(path: string, body?: unknown) {
+    return request<T>("PATCH", BASE + path, { body })
+  },
+  del<T = void>(path: string) {
+    return request<T>("DELETE", BASE + path)
+  },
 }

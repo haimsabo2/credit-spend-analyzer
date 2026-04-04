@@ -26,11 +26,13 @@ Local-first app for analyzing monthly credit-card spend from legacy `.xls` repor
    pip install -r requirements.txt
    ```
 
-3. The `data/` directory is created automatically when the app starts. To override the DB path:
+3. The `data/` directory under the **repo root** is created automatically when the app starts. The default SQLite file is `data/app.db` (path is resolved relative to the repo root in `backend/app/db.py`). To override the DB path:
 
    ```bash
-   set CSA_DATABASE_URL=sqlite:///../data/app.db
+   set CSA_DATABASE_URL=sqlite:///data/app.db
    ```
+
+   Or use an absolute path, e.g. `set CSA_DATABASE_URL=sqlite:///C:/path/to/app.db`.
 
 4. Start the API server:
 

@@ -66,7 +66,7 @@ export function DataTable<T>({
   if (isLoading) {
     return (
       <div className="rounded-md border">
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
               {columns.map((col, i) => (
@@ -100,7 +100,7 @@ export function DataTable<T>({
           isFetching && !isLoading && "opacity-60",
         )}
       >
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>

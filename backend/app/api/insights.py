@@ -6,14 +6,18 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
 from ..dependencies import SessionDep
+from ..models import MerchantSpendGroup
 from ..schemas import (
     AnomalyItem,
     CardSpend,
     CategoryMonthlyRow,
     CategorySpend,
     CategoryYearMerchantsResponse,
+    MerchantGroupSeriesResponse,
     MerchantMonthlySeries,
     MerchantSpend,
+    MonthCategorySubcategoriesResponse,
+    SubcategoryMonthSlice,
     SummaryResponse,
     TrendsResponse,
 )
@@ -23,7 +27,44 @@ from ..utils import trailing_calendar_months_ending_at
 router = APIRouter()
 
 _TOP_MERCHANTS_YEAR_BREAKDOWN = 14
+_TOP_SUBCATEGORY_YEAR_BREAKDOWN = 14
 _OTHER_MERCHANT_KEY = "Other"
+_OTHER_SUBCATEGORY_KEY = "Other"
+
+
+def _months_inclusive_range(first_ym: str, last_ym: str) -> list[str]:
+    """Every YYYY-MM from *first_ym* through *last_ym* inclusive (calendar order)."""
+    y1, m1 = int(first_ym[:4]), int(first_ym[5:7])
+    y2, m2 = int(last_ym[:4]), int(last_ym[5:7])
+    out: list[str] = []
+    y, m = y1, m1
+    while (y < y2) or (y == y2 and m <= m2):
+        out.append(f"{y}-{m:02d}")
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return out
+
+
+def _calendar_year_month_labels_with_data_span(session, year: int) -> list[str]:
+    """First month in *year* with any transaction through last (gaps kept as zero columns)."""
+    start_m = f"{year}-01"
+    end_m = f"{year}-12"
+    rows = session.execute(
+        text("""
+            SELECT u.month
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  u.month >= :start_m AND u.month <= :end_m
+            GROUP  BY u.month
+            ORDER  BY u.month
+        """),
+        {"start_m": start_m, "end_m": end_m},
+    ).all()
+    if not rows:
+        return []
+    return _months_inclusive_range(rows[0].month, rows[-1].month)
 
 
 def _category_series_for_months(session, month_labels: list[str]) -> dict[str, list[float]]:
@@ -129,13 +170,17 @@ def _category_year_merchant_breakdown(
     rows = session.execute(
         text(f"""
             SELECT u.month,
-                   t.description AS merchant_key,
-                   SUM(t.amount) AS total
+                   SUM(t.amount) AS total,
+                   COALESCE(MAX(g.display_name), MIN(t.description)) AS merchant_label
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN merchant_spend_group_member m
+                   ON lower(trim(t.description)) = m.pattern_key
+            LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             WHERE  u.month IN ({months_list})
               AND  {where_cat}
-            GROUP  BY u.month, t.description
+            GROUP  BY u.month,
+                     COALESCE(CAST(g.id AS TEXT), lower(trim(t.description)))
         """),
         params,
     ).all()
@@ -146,7 +191,7 @@ def _category_year_merchant_breakdown(
     per_merchant: dict[str, list[float]] = {}
     lookup: dict[tuple[str, str], float] = {}
     for r in rows:
-        mk = (r.merchant_key or "").strip() or "(no description)"
+        mk = (r.merchant_label or "").strip() or "(no description)"
         lookup[(r.month, mk)] = float(r.total)
         if mk not in per_merchant:
             per_merchant[mk] = [0.0] * len(month_labels)
@@ -173,6 +218,81 @@ def _category_year_merchant_breakdown(
         MerchantMonthlySeries(merchant_key=k, amounts=merged[k]) for k in keys_for_response
     ]
     return CategoryYearMerchantsResponse(months=month_labels, merchants=merchants_out)
+
+
+def _category_year_subcategory_breakdown(
+    session,
+    month_labels: list[str],
+    category_id: Optional[int],
+) -> CategoryYearMerchantsResponse:
+    """Per-subcategory monthly totals; rows without subcategory roll into the parent category name."""
+    if not month_labels:
+        return CategoryYearMerchantsResponse(months=[], merchants=[])
+
+    months_list = ",".join(f"'{m}'" for m in month_labels)
+    if category_id is None:
+        where_cat = "t.category_id IS NULL"
+        params: dict = {}
+    else:
+        where_cat = "t.category_id = :cid"
+        params = {"cid": category_id}
+
+    bucket_expr = """
+        CASE
+          WHEN t.subcategory_id IS NOT NULL THEN s.name
+          WHEN t.category_id IS NULL THEN 'Uncategorized'
+          ELSE COALESCE(c.name, 'Uncategorized')
+        END
+    """
+
+    rows = session.execute(
+        text(f"""
+            SELECT u.month,
+                   {bucket_expr} AS bucket_label,
+                   SUM(t.amount) AS total
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN subcategory s ON t.subcategory_id = s.id
+            LEFT JOIN category c ON t.category_id = c.id
+            WHERE  u.month IN ({months_list})
+              AND  {where_cat}
+            GROUP  BY u.month, {bucket_expr}
+        """),
+        params,
+    ).all()
+
+    if not rows:
+        return CategoryYearMerchantsResponse(months=month_labels, merchants=[])
+
+    per_label: dict[str, list[float]] = {}
+    lookup: dict[tuple[str, str], float] = {}
+    for r in rows:
+        lbl = (r.bucket_label or "").strip() or "—"
+        lookup[(r.month, lbl)] = float(r.total)
+        if lbl not in per_label:
+            per_label[lbl] = [0.0] * len(month_labels)
+
+    for lbl in list(per_label.keys()):
+        per_label[lbl] = [lookup.get((m, lbl), 0.0) for m in month_labels]
+
+    totals = {lbl: sum(amts) for lbl, amts in per_label.items()}
+    sorted_by_total_desc = sorted(totals.keys(), key=lambda k: totals[k], reverse=True)
+    top_keys = sorted_by_total_desc[:_TOP_SUBCATEGORY_YEAR_BREAKDOWN]
+    tail_keys = sorted_by_total_desc[_TOP_SUBCATEGORY_YEAR_BREAKDOWN:]
+
+    merged: dict[str, list[float]] = {k: per_label[k][:] for k in top_keys}
+    if tail_keys:
+        other_amt = [0.0] * len(month_labels)
+        for tk in tail_keys:
+            for i, v in enumerate(per_label[tk]):
+                other_amt[i] += v
+        merged[_OTHER_SUBCATEGORY_KEY] = other_amt
+
+    keys_for_response = sorted(merged.keys(), key=lambda k: sum(merged[k]))
+    series_out = [
+        MerchantMonthlySeries(merchant_key=k, amounts=merged[k]) for k in keys_for_response
+    ]
+    return CategoryYearMerchantsResponse(months=month_labels, merchants=series_out)
 
 
 # ── GET /api/insights/summary ──────────────────────────────────────────────
@@ -232,14 +352,16 @@ def get_summary(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-\d
 
     merch_rows = session.execute(
         text("""
-            SELECT t.description AS merchant_key,
-                   t.description AS display_name,
-                   SUM(t.amount)  AS amount,
-                   COUNT(*)       AS txn_count
+            SELECT COALESCE(MAX(g.display_name), MIN(t.description)) AS display_name,
+                   SUM(t.amount) AS amount,
+                   COUNT(*) AS txn_count
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN merchant_spend_group_member m
+                   ON lower(trim(t.description)) = m.pattern_key
+            LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             WHERE  u.month = :month
-            GROUP  BY t.description
+            GROUP  BY COALESCE(CAST(g.id AS TEXT), lower(trim(t.description)))
             ORDER  BY amount DESC
             LIMIT  10
         """),
@@ -247,7 +369,7 @@ def get_summary(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-\d
     ).all()
     top_merchants = [
         MerchantSpend(
-            merchant_key=r.merchant_key,
+            merchant_key=r.display_name,
             display_name=r.display_name,
             amount=r.amount,
             txn_count=r.txn_count,
@@ -328,7 +450,7 @@ def get_trends(
         return _trends_for_month_labels(session, month_labels)
 
     if year is not None:
-        month_labels = [f"{year}-{m:02d}" for m in range(1, 13)]
+        month_labels = _calendar_year_month_labels_with_data_span(session, year)
         return _trends_for_month_labels(session, month_labels)
 
     monthly_rows = session.execute(
@@ -397,8 +519,147 @@ def get_category_year_merchants(
             status_code=422,
             detail="Provide either year or trailing_calendar_months",
         )
-    month_labels = [f"{year}-{m:02d}" for m in range(1, 13)]
+    month_labels = _calendar_year_month_labels_with_data_span(session, year)
+    if not month_labels:
+        return CategoryYearMerchantsResponse(months=[], merchants=[])
     return _category_year_merchant_breakdown(session, month_labels, category_id)
+
+
+@router.get("/category-year-subcategories", response_model=CategoryYearMerchantsResponse)
+def get_category_year_subcategories(
+    session: SessionDep,
+    year: Optional[int] = Query(None, ge=1990, le=2100),
+    trailing_calendar_months: Optional[int] = Query(
+        None,
+        ge=1,
+        le=24,
+        description="Trailing N calendar months ending at MAX(upload.month); use instead of year",
+    ),
+    category_id: Optional[int] = Query(
+        None,
+        description="Category id; omit for uncategorized (category_id IS NULL)",
+    ),
+):
+    if trailing_calendar_months is not None:
+        max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
+        if not max_row or max_row.m is None:
+            return CategoryYearMerchantsResponse(months=[], merchants=[])
+        month_labels = trailing_calendar_months_ending_at(max_row.m, trailing_calendar_months)
+        return _category_year_subcategory_breakdown(session, month_labels, category_id)
+    if year is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either year or trailing_calendar_months",
+        )
+    month_labels = _calendar_year_month_labels_with_data_span(session, year)
+    if not month_labels:
+        return CategoryYearMerchantsResponse(months=[], merchants=[])
+    return _category_year_subcategory_breakdown(session, month_labels, category_id)
+
+
+@router.get("/month-category-subcategories", response_model=MonthCategorySubcategoriesResponse)
+def get_month_category_subcategories(
+    session: SessionDep,
+    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    category_id: Optional[int] = Query(
+        None,
+        description="Category id; omit for uncategorized bucket",
+    ),
+):
+    if category_id is None:
+        where_cat = "t.category_id IS NULL"
+        params: dict = {"month": month}
+    else:
+        where_cat = "t.category_id = :cid"
+        params = {"month": month, "cid": category_id}
+
+    bucket_expr = """
+        CASE
+          WHEN t.subcategory_id IS NOT NULL THEN s.name
+          WHEN t.category_id IS NULL THEN 'Uncategorized'
+          ELSE COALESCE(c.name, 'Uncategorized')
+        END
+    """
+    rows = session.execute(
+        text(f"""
+            SELECT {bucket_expr} AS label,
+                   SUM(t.amount) AS amount
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN subcategory s ON t.subcategory_id = s.id
+            LEFT JOIN category c ON t.category_id = c.id
+            WHERE  u.month = :month
+              AND  {where_cat}
+            GROUP  BY {bucket_expr}
+            ORDER  BY amount DESC
+        """),
+        params,
+    ).all()
+    items = [
+        SubcategoryMonthSlice(label=(r.label or "").strip() or "—", amount=float(r.amount))
+        for r in rows
+    ]
+    return MonthCategorySubcategoriesResponse(items=items)
+
+
+def _month_labels_for_merchant_series(
+    session,
+    year: Optional[int],
+    trailing_calendar_months: Optional[int],
+) -> list[str]:
+    if trailing_calendar_months is not None:
+        max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
+        if not max_row or max_row.m is None:
+            return []
+        return trailing_calendar_months_ending_at(
+            max_row.m, trailing_calendar_months
+        )
+    if year is None:
+        return []
+    return _calendar_year_month_labels_with_data_span(session, year)
+
+
+@router.get("/merchant-group-series", response_model=MerchantGroupSeriesResponse)
+def get_merchant_group_series(
+    session: SessionDep,
+    group_id: int = Query(..., ge=1),
+    year: Optional[int] = Query(None, ge=1990, le=2100),
+    trailing_calendar_months: Optional[int] = Query(
+        None,
+        ge=1,
+        le=24,
+        description="Trailing N calendar months ending at MAX(upload.month)",
+    ),
+):
+    if not session.get(MerchantSpendGroup, group_id):
+        raise HTTPException(404, detail="Group not found")
+    if trailing_calendar_months is None and year is None:
+        raise HTTPException(
+            422,
+            detail="Provide either year or trailing_calendar_months",
+        )
+    month_labels = _month_labels_for_merchant_series(
+        session, year, trailing_calendar_months
+    )
+    if not month_labels:
+        return MerchantGroupSeriesResponse(months=[], amounts=[])
+    months_in = ",".join(f"'{m}'" for m in month_labels)
+    rows = session.execute(
+        text(f"""
+            SELECT u.month, SUM(t.amount) AS total
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            JOIN   merchant_spend_group_member m
+                   ON lower(trim(t.description)) = m.pattern_key
+            WHERE  m.group_id = :gid
+              AND  u.month IN ({months_in})
+            GROUP  BY u.month
+        """),
+        {"gid": group_id},
+    ).all()
+    lookup = {r.month: float(r.total) for r in rows}
+    amounts = [lookup.get(m, 0.0) for m in month_labels]
+    return MerchantGroupSeriesResponse(months=month_labels, amounts=amounts)
 
 
 # ── GET /api/insights/anomalies ───────────────────────────────────────────

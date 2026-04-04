@@ -61,6 +61,7 @@ export interface TransactionRead {
   currency: string | null
   needs_review: boolean
   category_id: number | null
+  subcategory_id?: number | null
   confidence: number
   rule_id_applied: number | null
   spend_pattern?: string
@@ -87,6 +88,7 @@ export interface TransactionQueryParams {
   card_label?: string
   section?: string
   category_id?: number
+  subcategory_id?: number
   needs_review?: boolean
   q?: string
   amount_min?: number
@@ -94,6 +96,52 @@ export interface TransactionQueryParams {
   spend_pattern?: string
   limit?: number
   offset?: number
+}
+
+export interface SubcategoryRead {
+  id: number
+  category_id: number
+  name: string
+}
+
+export interface MerchantSpendGroupRead {
+  id: number
+  display_name: string
+  created_at: string
+}
+
+export interface MerchantSpendGroupMemberRead {
+  id: number
+  group_id: number
+  pattern_key: string
+}
+
+export interface MerchantGroupSeriesResponse {
+  months: string[]
+  amounts: number[]
+}
+
+export interface MerchantGroupRow {
+  pattern_key: string
+  display_description: string
+  occurrence_count: number
+  total_amount: number
+  representative_transaction_id: number
+  category_id: number | null
+  subcategory_id?: number | null
+  needs_review_any: boolean
+  spend_group_name?: string | null
+}
+
+export interface MerchantGroupListResponse {
+  items: MerchantGroupRow[]
+  total: number
+}
+
+export interface MerchantGroupActionBody {
+  transaction_id?: number
+  pattern_key?: string
+  subcategory_id?: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +199,10 @@ export interface MerchantMonthlySeries {
 export interface CategoryYearMerchantsResponse {
   months: string[]
   merchants: MerchantMonthlySeries[]
+}
+
+export interface MonthCategorySubcategoriesResponse {
+  items: { label: string; amount: number }[]
 }
 
 export interface AnomalyItem {

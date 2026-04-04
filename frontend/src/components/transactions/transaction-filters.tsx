@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react"
 import { useTranslation } from "react-i18next"
+import { useQuery } from "@tanstack/react-query"
 import type { CategoryRead } from "@/types/api"
+import { listSubcategories } from "@/api/categories"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,6 +17,7 @@ import { Search, X } from "lucide-react"
 export interface FilterValues {
   q: string
   category_id: string
+  subcategory_id: string
   card_label: string
   section: string
   needs_review: string
@@ -26,6 +29,7 @@ export interface FilterValues {
 export const EMPTY_FILTERS: FilterValues = {
   q: "",
   category_id: "",
+  subcategory_id: "",
   card_label: "",
   section: "",
   needs_review: "",
@@ -52,6 +56,12 @@ function useDebounced(value: string, ms: number) {
 
 export function TransactionFilters({ filters, onChange, categories, cardLabels }: Props) {
   const { t } = useTranslation()
+  const catNum = filters.category_id ? Number(filters.category_id) : 0
+  const { data: subcategories } = useQuery({
+    queryKey: ["subcategories", catNum],
+    queryFn: () => listSubcategories(catNum),
+    enabled: catNum > 0,
+  })
   const [localQ, setLocalQ] = useState(filters.q)
   const [localMin, setLocalMin] = useState(filters.amount_min)
   const [localMax, setLocalMax] = useState(filters.amount_max)
@@ -94,7 +104,15 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
         />
       </div>
 
-      <Select value={filters.category_id || "all"} onValueChange={(v) => update({ category_id: v === "all" ? "" : v })}>
+      <Select
+        value={filters.category_id || "all"}
+        onValueChange={(v) =>
+          update({
+            category_id: v === "all" ? "" : v,
+            subcategory_id: "",
+          })
+        }
+      >
         <SelectTrigger className="w-40">
           <SelectValue placeholder={t("transactionsTable.filterCategoryPlaceholder")} />
         </SelectTrigger>
@@ -103,6 +121,24 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
           {categories?.map((c) => (
             <SelectItem key={c.id} value={String(c.id)}>
               {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={filters.subcategory_id || "all"}
+        onValueChange={(v) => update({ subcategory_id: v === "all" ? "" : v })}
+        disabled={!catNum || !subcategories?.length}
+      >
+        <SelectTrigger className="w-36">
+          <SelectValue placeholder={t("transactionsTable.filterSubcategoryPlaceholder")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{t("transactionsTable.allSubcategories")}</SelectItem>
+          {subcategories?.map((s) => (
+            <SelectItem key={s.id} value={String(s.id)}>
+              {s.name}
             </SelectItem>
           ))}
         </SelectContent>

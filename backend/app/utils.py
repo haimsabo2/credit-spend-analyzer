@@ -41,6 +41,11 @@ def next_month(month: str) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
 
+def normalize_merchant_pattern_key(description: str) -> str:
+    """Same key as merchant groups / merchant_key rules: lower(strip(description))."""
+    return (description or "").strip().lower()
+
+
 def trailing_calendar_months_ending_at(end_month: str, n: int) -> list[str]:
     """Return *n* consecutive calendar months ending at *end_month* (inclusive), oldest first."""
     ey, em = int(end_month[:4]), int(end_month[5:7])

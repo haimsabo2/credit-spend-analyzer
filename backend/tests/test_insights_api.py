@@ -126,17 +126,19 @@ def test_trends_empty(client: TestClient):
     assert len(data["txn_count_series"]) == len(data["months"])
 
 
-def test_trends_year_twelve_months(seeded_client: TestClient):
-    """Calendar year view returns 12 slots; sparse data fills zeros elsewhere."""
+def test_trends_year_trimmed_to_data_span(seeded_client: TestClient):
+    """Calendar year returns only months from first upload month through last (no empty tail)."""
     r = seeded_client.get("/api/insights/trends", params={"year": 2026})
     assert r.status_code == 200
     data = r.json()
-    assert len(data["months"]) == 12
-    assert data["months"][0] == "2026-01"
-    assert data["months"][11] == "2026-12"
-    assert len(data["total_spend_series"]) == 12
-    assert len(data["txn_count_series"]) == 12
+    n = len(data["months"])
+    assert 1 <= n <= 12
+    assert all(isinstance(m, str) and len(m) == 7 and m.startswith("2026-") for m in data["months"])
+    assert data["months"] == sorted(data["months"])
+    assert len(data["total_spend_series"]) == n
+    assert len(data["txn_count_series"]) == n
     assert sum(data["total_spend_series"]) > 0
+    assert "2026-04" in data["months"]
     idx = data["months"].index("2026-04")
     assert data["txn_count_series"][idx] > 0
 
@@ -146,7 +148,7 @@ def test_trends_year_twelve_months(seeded_client: TestClient):
     for row in cm:
         assert "category_id" in row
         assert isinstance(row["category_name"], str)
-        assert len(row["amounts"]) == 12
+        assert len(row["amounts"]) == n
         assert isinstance(row["year_total"], (int, float))
         assert abs(row["year_total"] - sum(row["amounts"])) < 0.02
 
@@ -155,9 +157,9 @@ def test_trends_year_all_zeros(client: TestClient):
     r = client.get("/api/insights/trends", params={"year": 1999})
     assert r.status_code == 200
     data = r.json()
-    assert len(data["months"]) == 12
-    assert all(x == 0 for x in data["total_spend_series"])
-    assert data["txn_count_series"] == [0] * 12
+    assert data["months"] == []
+    assert data["total_spend_series"] == []
+    assert data["txn_count_series"] == []
     assert data["category_monthly"] == []
 
 
@@ -210,8 +212,7 @@ def test_category_year_merchants_empty_year(client: TestClient):
     r = client.get("/api/insights/category-year-merchants", params={"year": 1999})
     assert r.status_code == 200
     data = r.json()
-    assert len(data["months"]) == 12
-    assert data["months"][0] == "1999-01"
+    assert data["months"] == []
     assert data["merchants"] == []
 
 
@@ -220,12 +221,14 @@ def test_category_year_merchants_shape_uncategorized(client: TestClient):
     r = client.get("/api/insights/category-year-merchants", params={"year": 2026})
     assert r.status_code == 200
     data = r.json()
-    assert len(data["months"]) == 12
+    n = len(data["months"])
+    assert n == 0 or (1 <= n <= 12)
     assert isinstance(data["merchants"], list)
     for m in data["merchants"]:
         assert isinstance(m["merchant_key"], str)
-        assert len(m["amounts"]) == 12
-        assert isinstance(m["amounts"][0], (int, float))
+        assert len(m["amounts"]) == n
+        if n > 0:
+            assert isinstance(m["amounts"][0], (int, float))
 
 
 def test_category_year_merchants_totals_match_category_monthly(seeded_client: TestClient):
@@ -244,12 +247,13 @@ def test_category_year_merchants_totals_match_category_monthly(seeded_client: Te
     mr = seeded_client.get("/api/insights/category-year-merchants", params=params)
     assert mr.status_code == 200
     breakdown = mr.json()
-    assert len(breakdown["months"]) == 12
-    by_month_merch = [0.0] * 12
+    n = len(trends["months"])
+    assert len(breakdown["months"]) == n
+    by_month_merch = [0.0] * n
     for merch in breakdown["merchants"]:
         for i, v in enumerate(merch["amounts"]):
             by_month_merch[i] += float(v)
-    for i in range(12):
+    for i in range(n):
         assert abs(by_month_merch[i] - float(row["amounts"][i])) < 0.02
 
 
@@ -305,3 +309,48 @@ def test_anomalies_empty_month(client: TestClient):
 def test_anomalies_rejects_bad_month(client: TestClient):
     r = client.get("/api/insights/anomalies", params={"month": "bad"})
     assert r.status_code == 422
+
+
+def test_category_year_subcategories_requires_year_or_trailing(client: TestClient):
+    r = client.get("/api/insights/category-year-subcategories")
+    assert r.status_code == 422
+
+
+def test_category_year_subcategories_matches_merchants_months(seeded_client: TestClient):
+    tr = seeded_client.get("/api/insights/trends", params={"year": 2026})
+    assert tr.status_code == 200
+    trends = tr.json()
+    cm = trends.get("category_monthly") or []
+    if not cm:
+        pytest.skip("No category_monthly in seeded data")
+    row = cm[0]
+    cid = row["category_id"]
+    params: dict = {"year": 2026}
+    if cid is not None:
+        params["category_id"] = cid
+    sr = seeded_client.get("/api/insights/category-year-subcategories", params=params)
+    assert sr.status_code == 200
+    sub = sr.json()
+    assert sub["months"] == trends["months"]
+    n = len(sub["months"])
+    for m in sub["merchants"]:
+        assert len(m["amounts"]) == n
+    by_month = [0.0] * n
+    for series in sub["merchants"]:
+        for i, v in enumerate(series["amounts"]):
+            by_month[i] += float(v)
+    for i in range(n):
+        assert abs(by_month[i] - float(row["amounts"][i])) < 0.02
+
+
+def test_month_category_subcategories_shape(seeded_client: TestClient):
+    r = seeded_client.get(
+        "/api/insights/month-category-subcategories",
+        params={"month": "2026-04"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "items" in data
+    for it in data["items"]:
+        assert isinstance(it["label"], str)
+        assert isinstance(it["amount"], (int, float))
