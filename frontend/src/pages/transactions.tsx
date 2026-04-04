@@ -20,6 +20,7 @@ import type { MerchantGroupRow } from "@/types/api"
 import { approveMerchantGroup, unapproveMerchantGroup } from "@/api/transactions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { debugSourceDialog, sourceDialogRowPayload } from "@/lib/source-dialog-debug"
 
 const PAGE_SIZE = 50
 const MONTH_GROUPED_LIMIT = 500
@@ -116,11 +117,23 @@ export default function TransactionsPage() {
   const [sourceTxn, setSourceTxn] = useState<TransactionRead | null>(null)
   const [sourceOpen, setSourceOpen] = useState(false)
 
+  useEffect(() => {
+    debugSourceDialog("state", {
+      sourceOpen,
+      transactionId: sourceTxn?.id ?? null,
+      source_trace_upload_id: sourceTxn?.source_trace_upload_id ?? null,
+    })
+  }, [sourceOpen, sourceTxn])
+
   const columns = useMemo(
     () =>
       getTransactionColumns(t, {
         plainHeaders: true,
         onOpenSource: (row) => {
+          debugSourceDialog("onOpenSource", {
+            ...sourceDialogRowPayload(row),
+            note: "scheduling setState",
+          })
           setSourceTxn(row)
           setSourceOpen(true)
         },

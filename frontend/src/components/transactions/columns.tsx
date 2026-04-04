@@ -9,6 +9,11 @@ import { formatCurrency } from "@/lib/format"
 import { formatTransactionTableDate } from "@/utils/format"
 import { ArrowUpDown, FileSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  debugSourceDialog,
+  markSourceDialogClick,
+  sourceDialogRowPayload,
+} from "@/lib/source-dialog-debug"
 
 function SortHeader({
   column,
@@ -175,7 +180,11 @@ export function getTransactionColumns(
           variant="ghost"
           size="icon"
           className="h-8 w-8 shrink-0"
-          onClick={() => onSource(row.original)}
+          onClick={(e) => {
+            markSourceDialogClick()
+            debugSourceDialog("click", sourceDialogRowPayload(row.original, e.timeStamp))
+            onSource(row.original)
+          }}
           title={t("transactionSource.open")}
         >
           <FileSearch className="h-4 w-4" />
