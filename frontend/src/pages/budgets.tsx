@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useMonthStore, formatMonthLabel } from "@/stores/use-month-store"
 import { useCategories } from "@/hooks/use-categories"
 import { useBudgets } from "@/hooks/use-budgets"
@@ -23,18 +24,18 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Wallet, Plus, AlertTriangle, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
-import { formatCurrency } from "@/lib/format"
+import { Wallet, Plus, AlertTriangle, CheckCircle2, AlertCircle, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
+import { formatCurrency } from "@/utils/format"
 import { cn } from "@/lib/utils"
 import type { BudgetAlertItem } from "@/types/api"
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; barColor: string; icon: typeof CheckCircle2 }> = {
-  ok: { label: "On track", color: "text-emerald-600 bg-emerald-50", barColor: "bg-emerald-500", icon: CheckCircle2 },
-  warn: { label: "Warning", color: "text-amber-600 bg-amber-50", barColor: "bg-amber-500", icon: AlertTriangle },
-  exceeded: { label: "Over budget", color: "text-red-600 bg-red-50", barColor: "bg-red-500", icon: AlertCircle },
+const STATUS_CONFIG: Record<string, { labelKey: string; color: string; barColor: string; icon: typeof CheckCircle2 }> = {
+  ok: { labelKey: "budgets.onTrack", color: "text-emerald-600 bg-emerald-50", barColor: "bg-emerald-500", icon: CheckCircle2 },
+  warn: { labelKey: "budgets.warning", color: "text-amber-600 bg-amber-50", barColor: "bg-amber-500", icon: AlertTriangle },
+  exceeded: { labelKey: "budgets.overBudget", color: "text-red-600 bg-red-50", barColor: "bg-red-500", icon: AlertCircle },
 }
 
-function BudgetBar({ alert }: { alert: BudgetAlertItem }) {
+function BudgetBar({ alert, t }: { alert: BudgetAlertItem; t: (key: string) => string }) {
   const config = STATUS_CONFIG[alert.status] ?? STATUS_CONFIG.ok
   const pct = alert.budget > 0 ? Math.min((alert.spent / alert.budget) * 100, 100) : 0
   const StatusIcon = config.icon
@@ -48,7 +49,7 @@ function BudgetBar({ alert }: { alert: BudgetAlertItem }) {
               <h3 className="truncate font-medium">{alert.category_name}</h3>
               <Badge variant="outline" className={cn("text-[10px]", config.color)}>
                 <StatusIcon className="mr-1 h-3 w-3" />
-                {config.label}
+                {t(config.labelKey)}
               </Badge>
             </div>
 
@@ -61,9 +62,9 @@ function BudgetBar({ alert }: { alert: BudgetAlertItem }) {
 
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                {formatCurrency(alert.spent)} of {formatCurrency(alert.budget)}
+                {formatCurrency(alert.spent)} {t("budgets.of")} {formatCurrency(alert.budget)}
               </span>
-              <span>{pct.toFixed(0)}% used</span>
+              <span>{pct.toFixed(0)}% {t("budgets.used")}</span>
             </div>
           </div>
 
@@ -77,7 +78,7 @@ function BudgetBar({ alert }: { alert: BudgetAlertItem }) {
               {formatCurrency(Math.abs(alert.remaining))}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              {alert.remaining >= 0 ? "remaining" : "over"}
+              {alert.remaining >= 0 ? t("budgets.remaining") : t("budgets.over")}
             </p>
           </div>
         </div>
@@ -87,7 +88,8 @@ function BudgetBar({ alert }: { alert: BudgetAlertItem }) {
 }
 
 export default function BudgetsPage() {
-  const month = useMonthStore((s) => s.month)
+  const { t } = useTranslation()
+  const { month, prevMonth, nextMonth } = useMonthStore()
   const categories = useCategories()
   const budgets = useBudgets()
   const alerts = useBudgetAlerts()
@@ -132,16 +134,27 @@ export default function BudgetsPage() {
   const exceeded = alerts.data?.filter((a) => a.status === "exceeded") ?? []
   const warned = alerts.data?.filter((a) => a.status === "warn") ?? []
 
+  const totalBudget = alerts.data?.reduce((s, a) => s + a.budget, 0) ?? 0
+  const totalSpent = alerts.data?.reduce((s, a) => s + a.spent, 0) ?? 0
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Budgets</h1>
-          <p className="text-sm text-muted-foreground">{formatMonthLabel(month)}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("budgets.title")}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={prevMonth}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <p className="text-sm text-muted-foreground">{formatMonthLabel(month)}</p>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={nextMonth}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <Button className="gap-1.5" onClick={openDialog}>
           <Plus className="h-4 w-4" />
-          Set Budget
+          {t("budgets.setBudget")}
         </Button>
       </div>
 
@@ -153,6 +166,25 @@ export default function BudgetsPage() {
         </div>
       ) : (
         <>
+          {alerts.data && alerts.data.length > 0 && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Card>
+                <CardContent className="py-3">
+                  <p className="text-xs text-muted-foreground">{t("budgets.totalBudget")}</p>
+                  <p className="text-xl font-bold tabular-nums">{formatCurrency(totalBudget)}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="py-3">
+                  <p className="text-xs text-muted-foreground">{t("budgets.totalSpent")}</p>
+                  <p className={cn("text-xl font-bold tabular-nums", totalSpent > totalBudget ? "text-red-600" : "text-emerald-600")}>
+                    {formatCurrency(totalSpent)}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
           {(exceeded.length > 0 || warned.length > 0) && (
             <Card className="border-amber-200 bg-amber-50/50">
               <CardContent className="py-3">
@@ -161,13 +193,13 @@ export default function BudgetsPage() {
                   <div className="space-y-1 text-sm">
                     {exceeded.length > 0 && (
                       <p className="font-medium text-red-700">
-                        {exceeded.length} budget{exceeded.length > 1 ? "s" : ""} exceeded:{" "}
+                        {t("budgets.exceededAlert", { count: exceeded.length })}:{" "}
                         {exceeded.map((a) => a.category_name).join(", ")}
                       </p>
                     )}
                     {warned.length > 0 && (
                       <p className="text-amber-700">
-                        {warned.length} budget{warned.length > 1 ? "s" : ""} nearing limit:{" "}
+                        {t("budgets.warningAlert", { count: warned.length })}:{" "}
                         {warned.map((a) => a.category_name).join(", ")}
                       </p>
                     )}
@@ -185,7 +217,7 @@ export default function BudgetsPage() {
                   className="cursor-pointer"
                   onClick={() => handleEditBudget(alert)}
                 >
-                  <BudgetBar alert={alert} />
+                  <BudgetBar alert={alert} t={t} />
                 </div>
               ))}
             </div>
@@ -195,13 +227,13 @@ export default function BudgetsPage() {
                 <div className="rounded-full bg-muted p-3">
                   <Wallet className="h-8 w-8 text-muted-foreground" />
                 </div>
-                <h2 className="text-lg font-semibold">No budgets set</h2>
+                <h2 className="text-lg font-semibold">{t("budgets.noBudgets")}</h2>
                 <p className="text-sm text-muted-foreground">
-                  Set monthly budgets per category to track your spending.
+                  {t("budgets.noBudgetsHint")}
                 </p>
                 <Button variant="outline" className="mt-2 gap-1.5" onClick={openDialog}>
                   <Plus className="h-4 w-4" />
-                  Set Your First Budget
+                  {t("budgets.setFirst")}
                 </Button>
               </CardContent>
             </Card>
@@ -214,17 +246,17 @@ export default function BudgetsPage() {
           <DialogHeader>
             <DialogTitle>
               {selectedCategoryId && budgets.data?.some((b) => b.category_id === Number(selectedCategoryId))
-                ? "Edit Budget"
-                : "Set Budget"}
+                ? t("budgets.editBudget")
+                : t("budgets.setBudget")}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Category</label>
+              <label className="text-sm font-medium">{t("budgets.category")}</label>
               <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select category..." />
+                  <SelectValue placeholder={t("review.chooseCategory")} />
                 </SelectTrigger>
                 <SelectContent>
                   {categories.data?.map((c) => (
@@ -242,7 +274,7 @@ export default function BudgetsPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Monthly Budget Amount</label>
+              <label className="text-sm font-medium">{t("budgets.monthlyAmount")}</label>
               <Input
                 type="number"
                 min={0}
@@ -256,14 +288,14 @@ export default function BudgetsPage() {
 
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDialogOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={!selectedCategoryId || !budgetAmount || Number(budgetAmount) <= 0 || upsert.isPending}
             >
               {upsert.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Save
+              {t("budgets.save")}
             </Button>
           </DialogFooter>
         </DialogContent>

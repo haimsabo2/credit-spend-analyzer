@@ -45,30 +45,47 @@ def test_merchant_groups_list_includes_subcategory_id(seeded_client: TestClient)
     assert "subcategory_id" in items[0]
 
 
-def test_set_merchant_group_subcategory_without_approval_409(seeded_client: TestClient):
+def test_set_merchant_group_subcategory_without_explicit_approve_succeeds(
+    seeded_client: TestClient,
+):
+    """Subcategory preference no longer requires POST /approve first; server ensures approval."""
     r = seeded_client.get(
         "/api/transactions/merchant-groups",
-        params={"approved": False, "limit": 1},
+        params={"approved": False, "limit": 200},
     )
     assert r.status_code == 200
     items = r.json()["items"]
     if not items:
         pytest.skip("No pending merchant groups")
-    pk = items[0]["pattern_key"]
-    cats = seeded_client.get("/api/categories").json()
-    cid = cats[0]["id"]
+    g = next((x for x in items if x.get("category_id") is not None), None)
+    if not g:
+        g0 = items[0]
+        rep_id = g0["representative_transaction_id"]
+        cats = seeded_client.get("/api/categories").json()
+        cid = cats[0]["id"]
+        seeded_client.post(
+            f"/api/transactions/{rep_id}/categorize",
+            json={"category_id": cid, "rule_pattern": g0["display_description"]},
+        )
+        g = {
+            **g0,
+            "category_id": cid,
+        }
+    pk = g["pattern_key"]
+    cid = g["category_id"]
+    assert cid is not None
     sub = seeded_client.post(
         f"/api/categories/{cid}/subcategories",
-        json={"name": "SubFor409Test"},
+        json={"name": "SubAutoApproveTest"},
     )
     if sub.status_code != 201:
         pytest.skip("Could not create subcategory")
     sid = sub.json()["id"]
-    bad = seeded_client.post(
+    ok = seeded_client.post(
         "/api/transactions/merchant-groups/subcategory",
         json={"pattern_key": pk, "subcategory_id": sid},
     )
-    assert bad.status_code == 409
+    assert ok.status_code == 200
 
 
 def test_approved_merchant_subcategory_propagates_to_all_occurrences(

@@ -130,15 +130,21 @@ export function DataTable<T>({
                 const isAnomaly = anomalyNames?.has(desc)
                 const txn = row.original as unknown as TransactionRead
                 const pattern = txn.spend_pattern ?? "unknown"
+                const catConflict = txn.merchant_category_conflict
                 return (
                   <TableRow
                     key={row.id}
                     className={cn(
                       isAnomaly && "bg-destructive/5 border-s-2 border-s-destructive",
                       !isAnomaly &&
+                        catConflict &&
+                        "border-s-2 border-s-amber-500/70 bg-amber-500/[0.06] dark:bg-amber-500/10",
+                      !isAnomaly &&
+                        !catConflict &&
                         pattern === "recurring" &&
                         "bg-sky-500/[0.07] dark:bg-sky-500/10",
                       !isAnomaly &&
+                        !catConflict &&
                         pattern === "one_time" &&
                         "bg-violet-500/[0.08] dark:bg-violet-500/12",
                     )}

@@ -58,6 +58,34 @@ def test_create_group_and_member(seeded_client: TestClient):
     lst = seeded_client.get(f"/api/merchant-spend-groups/{gid}/members").json()
     assert len(lst) == 1
 
+    appr = seeded_client.get(
+        "/api/transactions/merchant-groups",
+        params={"approved": True, "limit": 500},
+    ).json()
+    pks_ok = {x["pattern_key"] for x in appr["items"]}
+    assert pk in pks_ok
+
+
+def test_sync_spend_group_approvals(seeded_client: TestClient):
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "Sync test group"},
+    ).json()
+    tx = seeded_client.get("/api/transactions", params={"limit": 1}).json()[0]
+    pk = (tx["description"] or "").strip().lower()
+    seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/members",
+        json={"pattern_key": pk},
+    )
+    r = seeded_client.post("/api/merchant-spend-groups/sync-approvals")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pattern_keys_processed"] >= 1
+    assert "new_approvals_created" in body
+    r2 = seeded_client.post("/api/merchant-spend-groups/sync-approvals")
+    assert r2.status_code == 200
+    assert r2.json()["new_approvals_created"] == 0
+
 
 def test_merchant_group_series_shape(seeded_client: TestClient):
     g = seeded_client.post(

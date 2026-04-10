@@ -8,15 +8,53 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from fastapi import UploadFile
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from ..models import Transaction, Upload
+from ..utils import normalize_merchant_pattern_key
 from ..parsing.service import parse_xls_bytes
 from ..schemas import AutoCategorizeSummary
 from ..upload_storage import write_upload_file
 from .batch_categorize import batch_categorize_transactions
 
 CONFLICT_SAMPLE_LIMIT = 25
+
+
+def _inherit_spend_pattern_from_user_set_peers(
+    session: Session, inserted: list[Transaction]
+) -> None:
+    """Copy spend_pattern + user_set from any existing row with same merchant key (import consistency)."""
+    if not inserted:
+        return
+    pks = {normalize_merchant_pattern_key(t.description) for t in inserted}
+    pks.discard("")
+    if not pks:
+        return
+
+    stmt = (
+        select(Transaction)
+        .where(Transaction.spend_pattern_user_set == True)  # noqa: E712
+        .where(func.lower(func.trim(Transaction.description)).in_(pks))
+        .order_by(Transaction.id.desc())
+    )
+    pattern_to_spend: dict[str, str] = {}
+    for peer in session.exec(stmt).all():
+        k = normalize_merchant_pattern_key(peer.description)
+        if k and k not in pattern_to_spend:
+            pattern_to_spend[k] = peer.spend_pattern
+
+    modified = False
+    for t in inserted:
+        k = normalize_merchant_pattern_key(t.description)
+        sp = pattern_to_spend.get(k)
+        if sp is None:
+            continue
+        t.spend_pattern = sp
+        t.spend_pattern_user_set = True
+        session.add(t)
+        modified = True
+    if modified:
+        session.commit()
 
 
 def build_raw_row_json(n: Any) -> Optional[str]:
@@ -307,6 +345,8 @@ def handle_upload(
     session.add(upload)
     session.commit()
     session.refresh(upload)
+
+    _inherit_spend_pattern_from_user_set_peers(session, inserted_txns)
 
     if defer_categorization:
         cat_summary = AutoCategorizeSummary(

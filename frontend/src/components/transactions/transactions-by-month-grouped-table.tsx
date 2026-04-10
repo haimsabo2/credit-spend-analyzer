@@ -4,9 +4,10 @@ import {
   getCoreRowModel,
   useReactTable,
   type ColumnDef,
+  type Row,
 } from "@tanstack/react-table"
 import { useTranslation } from "react-i18next"
-import { Inbox, Minus, Plus } from "lucide-react"
+import { AlertTriangle, Inbox, Minus, Plus } from "lucide-react"
 import {
   Table,
   TableBody,
@@ -35,6 +36,7 @@ function toMerchantGroupRow(g: MerchantTxnGroup): MerchantGroupRow {
     category_id: r.category_id,
     subcategory_id: r.subcategory_id ?? null,
     needs_review_any: g.transactions.some((t) => t.needs_review),
+    category_conflict: g.transactions.some((t) => t.merchant_category_conflict),
   }
 }
 
@@ -45,30 +47,32 @@ function colKey(col: ColumnDef<TransactionRead>): string {
 }
 
 function TransactionDataRow({
-  transaction,
-  columns,
+  row,
   anomalyNames,
 }: {
-  transaction: TransactionRead
-  columns: ColumnDef<TransactionRead>[]
+  row: Row<TransactionRead>
   anomalyNames?: Set<string>
 }) {
+  const transaction = row.original
   const desc = transaction.description
   const isAnomaly = anomalyNames?.has(desc)
   const pattern = transaction.spend_pattern ?? "unknown"
-  const table = useReactTable({
-    data: [transaction],
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  })
-  const row = table.getRowModel().rows[0]
-  if (!row) return null
+  const catConflict = transaction.merchant_category_conflict
   return (
     <TableRow
       className={cn(
         isAnomaly && "bg-destructive/5 border-s-2 border-s-destructive",
-        !isAnomaly && pattern === "recurring" && "bg-sky-500/[0.07] dark:bg-sky-500/10",
-        !isAnomaly && pattern === "one_time" && "bg-violet-500/[0.08] dark:bg-violet-500/12",
+        !isAnomaly &&
+          catConflict &&
+          "border-s-2 border-s-amber-500/70 bg-amber-500/[0.06] dark:bg-amber-500/10",
+        !isAnomaly &&
+          !catConflict &&
+          pattern === "recurring" &&
+          "bg-sky-500/[0.07] dark:bg-sky-500/10",
+        !isAnomaly &&
+          !catConflict &&
+          pattern === "one_time" &&
+          "bg-violet-500/[0.08] dark:bg-violet-500/12",
       )}
     >
       {row.getVisibleCells().map((cell) => (
@@ -106,10 +110,11 @@ export function TransactionsByMonthGroupedTable({
 
   const groups = useMemo(() => groupTransactionsByMerchantKey(data), [data])
 
-  const headerTable = useReactTable({
+  const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => String(row.id),
   })
 
   function toggleGroup(patternKey: string) {
@@ -163,7 +168,7 @@ export function TransactionsByMonthGroupedTable({
       >
         <Table className="table-fixed">
           <TableHeader>
-            {headerTable.getHeaderGroups().map((hg) => (
+            {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>
                 {hg.headers.map((header) => (
                   <TableHead key={header.id} style={{ width: header.getSize() }}>
@@ -187,10 +192,29 @@ export function TransactionsByMonthGroupedTable({
               </TableRow>
             ) : (
               groups.flatMap((g) => {
+                if (g.transactions.length === 1) {
+                  const txn = g.transactions[0]
+                  const dataRow = table.getRow(String(txn.id))
+                  if (!dataRow) return []
+                  return [
+                    <TransactionDataRow
+                      key={`t-${txn.id}`}
+                      row={dataRow}
+                      anomalyNames={anomalyNames}
+                    />,
+                  ]
+                }
                 const mg = toMerchantGroupRow(g)
                 const isOpen = expanded.has(g.patternKey)
                 const headerRow = (
-                  <TableRow key={`g-${g.patternKey}`} className="bg-muted/40 hover:bg-muted/50">
+                  <TableRow
+                    key={`g-${g.patternKey}`}
+                    className={cn(
+                      "bg-muted/40 hover:bg-muted/50",
+                      mg.category_conflict &&
+                        "border-s-2 border-s-amber-500/60 bg-amber-500/[0.08] dark:bg-amber-950/20",
+                    )}
+                  >
                     {columns.map((col) => (
                       <TableCell key={colKey(col)} style={{ width: col.size as number }}>
                         {renderGroupCell({
@@ -206,14 +230,17 @@ export function TransactionsByMonthGroupedTable({
                   </TableRow>
                 )
                 const childRows = isOpen
-                  ? g.transactions.map((txn) => (
-                      <TransactionDataRow
-                        key={`t-${txn.id}`}
-                        transaction={txn}
-                        columns={columns}
-                        anomalyNames={anomalyNames}
-                      />
-                    ))
+                  ? g.transactions.flatMap((txn) => {
+                      const dataRow = table.getRow(String(txn.id))
+                      if (!dataRow) return []
+                      return [
+                        <TransactionDataRow
+                          key={`t-${txn.id}`}
+                          row={dataRow}
+                          anomalyNames={anomalyNames}
+                        />,
+                      ]
+                    })
                   : []
                 return [headerRow, ...childRows]
               })
@@ -269,7 +296,16 @@ function renderGroupCell({
     case "description":
       return (
         <div className="flex max-w-[260px] items-center gap-2">
-          <span className="block truncate font-medium" title={group.displayDescription}>
+          {mgRow.category_conflict ? (
+            <span
+              className="shrink-0 text-amber-600 dark:text-amber-500"
+              title={t("transactionsTable.categoryConflictTitle")}
+              aria-label={t("transactionsTable.categoryConflictTitle")}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+            </span>
+          ) : null}
+          <span className="block min-w-0 flex-1 truncate font-medium" title={group.displayDescription}>
             {group.displayDescription}
           </span>
           <span className="tabular-nums text-xs text-muted-foreground">

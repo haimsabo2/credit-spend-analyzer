@@ -29,7 +29,7 @@ import {
   llmCategorizePending,
 } from "@/api/transactions"
 import { listCategories, createCategory } from "@/api/categories"
-import { formatCurrency, formatMonthShort } from "@/utils/format"
+import { formatCurrency } from "@/utils/format"
 import type { Transaction } from "@/api/types"
 import { ApiError } from "@/api/client"
 import { toast } from "sonner"
@@ -56,14 +56,6 @@ function getErrorMessage(err: unknown, fallback: string): string {
 
 const OTHER_VALUE = "__other__"
 
-const last12Months = (): string[] => {
-  const now = new Date()
-  return Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-  })
-}
-
 function getRulePattern(txn: Transaction): string {
   try {
     const meta = txn.meta_json ? JSON.parse(txn.meta_json) : null
@@ -77,8 +69,7 @@ function getRulePattern(txn: Transaction): string {
 export default function NeedsReviewPage() {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const { month: storeMonth, setMonth: setStoreMonth } = useMonthStore()
-  const months = useMemo(() => last12Months(), [])
+  const { month: storeMonth } = useMonthStore()
 
   const month = storeMonth
   const [search, setSearch] = useState("")
@@ -202,10 +193,6 @@ export default function NeedsReviewPage() {
     return map
   }, [filtered])
 
-  const handleMonthChange = (m: string) => {
-    setStoreMonth(m)
-  }
-
   const handleCategoryChange = (txnId: number, value: string) => {
     if (value === OTHER_VALUE) {
       setPendingOtherForRow(txnId)
@@ -253,40 +240,25 @@ export default function NeedsReviewPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">{t("review.title")}</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted-foreground">{t("review.month")}:</span>
-          <Select value={month} onValueChange={handleMonthChange}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {months.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {formatMonthShort(m)} {m.slice(0, 4)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {uncategorizedForAi > 0 && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => setAiDialogOpen(true)}
-              disabled={llmSuggestMutation.isPending}
-            >
-              {llmSuggestMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="h-3.5 w-3.5" />
-              )}
-              {llmSuggestMutation.isPending
-                ? t("review.aiSuggestRunning")
-                : t("review.aiSuggestButton", { count: uncategorizedForAi })}
-            </Button>
-          )}
-        </div>
+        {uncategorizedForAi > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5 self-start sm:self-center"
+            onClick={() => setAiDialogOpen(true)}
+            disabled={llmSuggestMutation.isPending}
+          >
+            {llmSuggestMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {llmSuggestMutation.isPending
+              ? t("review.aiSuggestRunning")
+              : t("review.aiSuggestButton", { count: uncategorizedForAi })}
+          </Button>
+        ) : null}
       </div>
 
       <AlertDialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>

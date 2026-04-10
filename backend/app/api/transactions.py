@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_, text
 from sqlmodel import Session, func, select
 
@@ -30,9 +33,14 @@ from ..services.batch_categorize import (
     batch_categorize_transactions,
     llm_categorize_transactions,
 )
-from ..services.merchant_subcategory import apply_merchant_subcategory_preference
+from ..services.merchant_subcategory import (
+    apply_approved_subcategory_after_category,
+    apply_merchant_subcategory_preference,
+    ensure_merchant_key_user_approval,
+)
 from ..services.spend_pattern import ALLOWED_SPEND_PATTERNS
 from ..services.classification import upsert_merchant_key_rule_and_propagate
+from ..services.merchant_category_conflict import merchant_category_conflict_pattern_keys
 from ..utils import normalize_merchant_pattern_key
 
 logger = logging.getLogger(__name__)
@@ -53,7 +61,15 @@ def _source_cells_from_raw(raw_row_data: str | None) -> list[str] | None:
     return None
 
 
-def transaction_to_read(session: Session, t: Transaction) -> TransactionRead:
+def transaction_to_read(
+    session: Session,
+    t: Transaction,
+    *,
+    conflict_keys: frozenset[str] | None = None,
+) -> TransactionRead:
+    ck = conflict_keys
+    if ck is None:
+        ck = merchant_category_conflict_pattern_keys(session)
     r = TransactionRead.model_validate(t)
     r.source_cells = _source_cells_from_raw(t.raw_row_data)
     tid = t.source_trace_upload_id
@@ -62,6 +78,8 @@ def transaction_to_read(session: Session, t: Transaction) -> TransactionRead:
         if u:
             r.source_upload_original_filename = u.original_filename
             r.source_stored_file_available = bool(u.stored_path)
+    pk = normalize_merchant_pattern_key(t.description)
+    r.merchant_category_conflict = bool(pk and pk in ck)
     return r
 
 
@@ -72,6 +90,9 @@ def transactions_to_reads(session: Session, rows: Iterable[Transaction]) -> list
     if trace_ids:
         ups = session.exec(select(Upload).where(Upload.id.in_(trace_ids))).all()
         up_map = {u.id: u for u in ups}
+    conflict_keys = (
+        merchant_category_conflict_pattern_keys(session) if txs else frozenset()
+    )
     out: list[TransactionRead] = []
     for t in txs:
         r = TransactionRead.model_validate(t)
@@ -81,6 +102,8 @@ def transactions_to_reads(session: Session, rows: Iterable[Transaction]) -> list
             u = up_map[tid]
             r.source_upload_original_filename = u.original_filename
             r.source_stored_file_available = bool(u.stored_path)
+        pk = normalize_merchant_pattern_key(t.description)
+        r.merchant_category_conflict = bool(pk and pk in conflict_keys)
         out.append(r)
     return out
 
@@ -139,10 +162,17 @@ def _merchant_groups_main_where_sql(
         """(
   (:approved = 0 AND NOT EXISTS (
     SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  ) AND NOT EXISTS (
+    SELECT 1 FROM merchant_spend_group_member m WHERE m.pattern_key = g.pattern_key
   ))
   OR
-  (:approved = 1 AND EXISTS (
-    SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+  (:approved = 1 AND (
+    EXISTS (
+      SELECT 1 FROM merchant_key_user_approval a WHERE a.pattern_key = g.pattern_key
+    )
+    OR EXISTS (
+      SELECT 1 FROM merchant_spend_group_member m WHERE m.pattern_key = g.pattern_key
+    )
   ))
 )""",
         extra,
@@ -396,6 +426,7 @@ WHERE ({main_where})
         session.execute(text(count_sql), count_params).mappings().one()["n"]
     )
     rows = session.execute(text(list_sql), params).mappings().all()
+    conflict_keys = merchant_category_conflict_pattern_keys(session)
     items = [
         MerchantGroupRow(
             pattern_key=r["pattern_key"],
@@ -407,6 +438,7 @@ WHERE ({main_where})
             subcategory_id=r["subcategory_id"],
             needs_review_any=bool(r["needs_review_any"]),
             spend_group_name=r["spend_group_name"],
+            category_conflict=bool(r["pattern_key"] and r["pattern_key"] in conflict_keys),
         )
         for r in rows
     ]
@@ -465,6 +497,7 @@ def set_merchant_group_subcategory(
 ):
     """Set or clear preferred subcategory for an approved merchant (all matching rows)."""
     pattern_key = _resolve_merchant_action_pattern_key(session, body)
+    ensure_merchant_key_user_approval(session, pattern_key)
     approval = session.exec(
         select(MerchantKeyUserApproval).where(
             MerchantKeyUserApproval.pattern_key == pattern_key
@@ -472,8 +505,8 @@ def set_merchant_group_subcategory(
     ).first()
     if not approval:
         raise HTTPException(
-            409,
-            detail="Merchant must be approved before setting a subcategory preference",
+            500,
+            detail="Could not resolve merchant approval row",
         )
     if body.subcategory_id is not None:
         sub = session.get(Subcategory, body.subcategory_id)
@@ -539,6 +572,13 @@ def categorize_transaction(
 
     pattern = (body.rule_pattern or txn.description or "").strip()
     if not pattern:
+        pattern = normalize_merchant_pattern_key(txn.description or "")
+    ensure_merchant_key_user_approval(session, pattern if pattern else (txn.description or ""))
+    apply_approved_subcategory_after_category(session, txn)
+    session.add(txn)
+    session.flush()
+
+    if not pattern:
         session.commit()
         return CategorizeResponse(
             transaction_id=txn.id,
@@ -568,13 +608,26 @@ def update_spend_pattern(
     body: SpendPatternUpdate,
     session: SessionDep,
 ):
-    """Set recurring / one_time / unknown; marks as user override so auto-categorize won't change it."""
+    """Set recurring / one_time / unknown; marks as user override so auto-categorize won't change it.
+
+    Applies to all transactions with the same normalized merchant description (all months).
+    """
     txn = session.get(Transaction, transaction_id)
     if not txn:
         raise HTTPException(404, detail="Transaction not found")
-    txn.spend_pattern = body.spend_pattern
-    txn.spend_pattern_user_set = True
-    session.add(txn)
+    pk = normalize_merchant_pattern_key(txn.description)
+    if pk:
+        stmt = select(Transaction).where(
+            func.lower(func.trim(Transaction.description)) == pk
+        )
+        for t in session.exec(stmt).all():
+            t.spend_pattern = body.spend_pattern
+            t.spend_pattern_user_set = True
+            session.add(t)
+    else:
+        txn.spend_pattern = body.spend_pattern
+        txn.spend_pattern_user_set = True
+        session.add(txn)
     session.commit()
     session.refresh(txn)
     return transaction_to_read(session, txn)
@@ -590,6 +643,7 @@ def patch_transaction_subcategory(
     if not txn:
         raise HTTPException(404, detail="Transaction not found")
     pk = normalize_merchant_pattern_key(txn.description)
+    ensure_merchant_key_user_approval(session, txn.description or "")
     approval = session.exec(
         select(MerchantKeyUserApproval).where(
             MerchantKeyUserApproval.pattern_key == pk
@@ -770,3 +824,68 @@ def get_needs_review(
         .limit(limit)
     )
     return transactions_to_reads(session, session.exec(stmt).all())
+
+
+@router.get("/export")
+def export_transactions(
+    session: SessionDep,
+    month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    category_id: Optional[int] = Query(None),
+    format: str = Query("csv", pattern=r"^csv$"),
+):
+    """Export categorized transactions as CSV with enriched data."""
+    from ..models import Category, Subcategory as SubcategoryModel
+
+    stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id)
+    if month:
+        stmt = stmt.where(Upload.month == month)
+    if category_id is not None:
+        stmt = stmt.where(Transaction.category_id == category_id)
+    stmt = stmt.order_by(Upload.month, Transaction.posted_at, Transaction.id)
+
+    txns = session.exec(stmt).all()
+
+    cat_map: dict[int, str] = {}
+    for cat in session.exec(select(Category)).all():
+        cat_map[cat.id] = cat.name
+
+    sub_map: dict[int, str] = {}
+    for sub in session.exec(select(SubcategoryModel)).all():
+        sub_map[sub.id] = sub.name
+
+    upload_month_map: dict[int, str] = {}
+    for u in session.exec(select(Upload)).all():
+        upload_month_map[u.id] = u.month
+
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    writer = csv.writer(buf)
+    writer.writerow([
+        "ID", "Month", "Date", "Description", "Amount", "Currency",
+        "Category", "Subcategory", "Card", "Section",
+        "Spend Pattern", "Confidence", "Needs Review",
+    ])
+    for t in txns:
+        writer.writerow([
+            t.id,
+            upload_month_map.get(t.upload_id, ""),
+            str(t.posted_at) if t.posted_at else "",
+            t.description,
+            t.amount,
+            t.currency or "",
+            cat_map.get(t.category_id, "") if t.category_id else "",
+            sub_map.get(t.subcategory_id, "") if t.subcategory_id else "",
+            t.card_label or "",
+            t.section or "",
+            t.spend_pattern or "unknown",
+            t.confidence,
+            "Yes" if t.needs_review else "No",
+        ])
+
+    buf.seek(0)
+    filename = f"transactions-{month or 'all'}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

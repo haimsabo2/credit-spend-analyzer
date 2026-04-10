@@ -98,6 +98,7 @@ class TransactionRead(SQLModel):
     source_upload_original_filename: Optional[str] = None
     source_stored_file_available: bool = False
     source_cells: Optional[List[str]] = None
+    merchant_category_conflict: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -119,6 +120,7 @@ class MerchantGroupRow(SQLModel):
     subcategory_id: Optional[int] = None
     needs_review_any: bool = False
     spend_group_name: Optional[str] = None
+    category_conflict: bool = False
 
 
 class MerchantGroupListResponse(SQLModel):
@@ -403,6 +405,13 @@ class MerchantSpendGroupMemberAddResult(SQLModel):
     unmatched: bool = False
 
 
+class MerchantSpendGroupSyncApprovalsResponse(SQLModel):
+    """POST /merchant-spend-groups/sync-approvals — ensure user approval for every member pattern."""
+
+    pattern_keys_processed: int
+    new_approvals_created: int
+
+
 class MerchantGroupSeriesResponse(SQLModel):
     """Monthly totals for one spend group over a period (aligned months)."""
 
@@ -413,6 +422,58 @@ class MerchantGroupSeriesResponse(SQLModel):
 # ---------------------------------------------------------------------------
 # Classification rule schemas
 # ---------------------------------------------------------------------------
+
+class RecurringSpendItem(SQLModel):
+    merchant_key: str
+    display_name: str
+    avg_amount: float
+    months_present: int
+    total_months_in_window: int
+    total_amount: float
+    first_seen: str
+    last_seen: str
+    trend: str  # "stable", "increasing", "decreasing", "new"
+    category_name: Optional[str] = None
+    category_id: Optional[int] = None
+
+
+class RecurringSpendResponse(SQLModel):
+    items: List[RecurringSpendItem]
+    total_monthly_recurring: float
+    total_annual_estimate: float
+    window_months: int
+
+
+class TopUncategorizedMerchant(SQLModel):
+    description: str
+    total_amount: float
+    occurrence_count: int
+
+
+class DataQualityResponse(SQLModel):
+    total_transactions: int
+    categorized_count: int
+    uncategorized_count: int
+    coverage_pct: float
+    high_confidence_count: int
+    medium_confidence_count: int
+    low_confidence_count: int
+    needs_review_count: int
+    top_uncategorized_merchants: List[TopUncategorizedMerchant]
+
+
+class CardTrendPoint(SQLModel):
+    month: str
+    amount: float
+
+
+class CardTrendResponse(SQLModel):
+    card_label: str
+    total_amount: float
+    transaction_count: int
+    monthly_trend: List[CardTrendPoint]
+    top_categories: List[CategorySpend]
+
 
 class RuleRead(SQLModel):
     id: int

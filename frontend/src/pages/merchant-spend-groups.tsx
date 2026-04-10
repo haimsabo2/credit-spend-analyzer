@@ -29,11 +29,12 @@ import {
   addGroupMember,
   removeGroupMember,
   getMerchantGroupSeries,
+  syncSpendGroupApprovals,
 } from "@/api/merchantSpendGroups"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import { getApiErrorToastDescription } from "@/lib/api-client"
 import { toast } from "sonner"
-import { Loader2, Trash2 } from "lucide-react"
+import { Loader2, RefreshCw, Trash2 } from "lucide-react"
 
 const TRAILING = "__trail12__"
 
@@ -75,6 +76,26 @@ export default function MerchantSpendGroupsPage() {
       total: series.amounts[i] ?? 0,
     }))
   }, [series])
+
+  const syncApprovalsMut = useMutation({
+    mutationFn: syncSpendGroupApprovals,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["merchant-groups"] })
+      qc.invalidateQueries({ queryKey: ["transactions"] })
+      qc.invalidateQueries({ queryKey: ["needs-review"] })
+      toast.success(
+        t("merchantSpendGroups.syncSuccess", {
+          processed: data.pattern_keys_processed,
+          newCount: data.new_approvals_created,
+        }),
+      )
+    },
+    onError: (err) => {
+      toast.error(t("merchantSpendGroups.syncFailed"), {
+        description: getApiErrorToastDescription(err),
+      })
+    },
+  })
 
   const createMut = useMutation({
     mutationFn: () => createMerchantSpendGroup(newGroupName.trim()),
@@ -159,7 +180,24 @@ export default function MerchantSpendGroupsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{t("merchantSpendGroups.title")}</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">{t("merchantSpendGroups.title")}</h1>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 gap-2 self-start"
+          disabled={syncApprovalsMut.isPending}
+          onClick={() => syncApprovalsMut.mutate()}
+        >
+          {syncApprovalsMut.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          {t("merchantSpendGroups.syncApprovals")}
+        </Button>
+      </div>
       <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
         {t("merchantSpendGroups.intro")}
       </p>

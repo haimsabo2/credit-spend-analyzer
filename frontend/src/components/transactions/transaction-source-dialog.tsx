@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import type { TransactionRead } from "@/types/api"
-import { debugSourceDialog, markSourceDialogLayout } from "@/lib/source-dialog-debug"
 
 const DOWNLOAD_TIMEOUT_MS = 90_000
 
@@ -33,17 +32,6 @@ export function TransactionSourceDialog({
   const sheet = transaction?.source_sheet_index
 
   useEffect(() => {
-    debugSourceDialog("dialog props", {
-      open,
-      transactionId: transaction?.id ?? null,
-    })
-  }, [open, transaction?.id])
-
-  useLayoutEffect(() => {
-    if (open) markSourceDialogLayout()
-  }, [open])
-
-  useEffect(() => {
     if (!open) {
       downloadAbortRef.current?.abort()
       downloadAbortRef.current = null
@@ -60,7 +48,6 @@ export function TransactionSourceDialog({
   async function handleDownload() {
     if (traceId == null) return
     const filename = transaction?.source_upload_original_filename ?? "report.xls"
-    debugSourceDialog("download start", { traceId, filename })
     downloadAbortRef.current?.abort()
     const ac = new AbortController()
     downloadAbortRef.current = ac
@@ -74,10 +61,8 @@ export function TransactionSourceDialog({
       const res = await fetch(`${window.location.origin}/api/uploads/${traceId}/file`, {
         signal: ac.signal,
       })
-      debugSourceDialog("download response", { status: res.status, ok: res.ok })
       if (!res.ok) throw new Error("download_failed")
       const blob = await res.blob()
-      debugSourceDialog("download blob", { size: blob.size, type: blob.type })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
@@ -88,11 +73,6 @@ export function TransactionSourceDialog({
       a.remove()
       URL.revokeObjectURL(url)
     } catch (e) {
-      debugSourceDialog("download error", {
-        name: e instanceof Error ? e.name : typeof e,
-        message: e instanceof Error ? e.message : String(e),
-        timedOut,
-      })
       if (e instanceof DOMException && e.name === "AbortError") {
         if (timedOut) toast.error(t("transactionSource.downloadTimeout"))
       } else {
@@ -108,10 +88,7 @@ export function TransactionSourceDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={(v) => {
-        debugSourceDialog("dialog openChange", { open: v })
-        onOpenChange(v)
-      }}
+      onOpenChange={onOpenChange}
     >
       <DialogContent className="max-w-lg">
         <DialogHeader>

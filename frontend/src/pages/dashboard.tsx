@@ -20,10 +20,11 @@ import {
 } from "recharts"
 import { Upload } from "lucide-react"
 import { AnnualSpendMomLabels } from "@/components/dashboard/annual-spend-mom-labels"
+import { DataQualityCard } from "@/components/dashboard/data-quality-card"
+import { CardSpendSection } from "@/components/dashboard/card-spend-section"
 import { CategoryYearCarousel } from "@/components/dashboard/category-year-carousel"
 import { CategoryYearDrilldownDialog } from "@/components/dashboard/category-year-drilldown-dialog"
 import { MonthPieSubcategoryDrilldown } from "@/components/dashboard/month-pie-subcategory-drilldown"
-import { CategoryYearOverviewGrouped } from "@/components/dashboard/category-year-overview-grouped"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ChartCard } from "@/components/dashboard/chart-card"
 import { Button } from "@/components/ui/button"
@@ -247,6 +248,7 @@ export default function DashboardPage() {
   const categoryMonthlyRows = yearTrends?.category_monthly
 
   const [categoryDrilldownRow, setCategoryDrilldownRow] = useState<CategoryMonthlyRow | null>(null)
+
   const [monthPieDrill, setMonthPieDrill] = useState<{
     categoryId: number | null
     categoryName: string
@@ -583,32 +585,15 @@ export default function DashboardPage() {
 
           <ChartCard title={t("dashboard.annualByCategory")}>
             {yearTrendsLoading ? (
-              <div className="space-y-6">
-                <div className="flex flex-col gap-6">
-                  <Skeleton className="h-[300px] w-full rounded-md" />
-                  <Skeleton className="h-[300px] w-full rounded-md" />
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  {Array.from({ length: 3 }, (_, i) => (
-                    <Skeleton key={i} className="h-[248px] w-full rounded-md" />
-                  ))}
-                </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {Array.from({ length: 3 }, (_, i) => (
+                  <Skeleton key={i} className="h-[248px] w-full rounded-md" />
+                ))}
               </div>
             ) : (categoryMonthlyRows?.length ?? 0) === 0 ? (
               <p className="text-muted-foreground flex h-[120px] items-center justify-center text-sm">—</p>
             ) : (
               <div className="space-y-6">
-                <div>
-                  <h3 className="text-muted-foreground mb-2 text-sm font-medium">
-                    {t("dashboard.categoryYearOverviewHeading")}
-                  </h3>
-                  <CategoryYearOverviewGrouped
-                    rows={categoryMonthlyRows ?? []}
-                    monthLabels={yearTrends?.months ?? []}
-                    currency={currency}
-                    currencySymbol={currencySymbol}
-                  />
-                </div>
                 <div>
                   <h3 className="text-muted-foreground mb-2 text-sm font-medium">
                     {t("dashboard.categoryCarouselHeading")}
@@ -725,6 +710,8 @@ export default function DashboardPage() {
               <StatCard title={t("dashboard.needsReviewCount")} value={needsReview?.length ?? 0} />
             </div>
           )}
+
+          <DataQualityCard />
 
           <div className="grid gap-6 lg:grid-cols-2">
             <ChartCard title={t("charts.byCategory")} className="min-h-[240px] sm:min-h-[220px]">
@@ -852,6 +839,7 @@ export default function DashboardPage() {
             </ChartCard>
           </div>
           </div>
+          <CardSpendSection />
           <MonthPieSubcategoryDrilldown
             open={monthPieDrill != null}
             onOpenChange={(open) => {

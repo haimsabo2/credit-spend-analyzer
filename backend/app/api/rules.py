@@ -8,6 +8,7 @@ from sqlmodel import select
 from ..dependencies import SessionDep
 from ..models import Category, ClassificationRule
 from ..schemas import RuleCreateRequest, RuleRead, RuleUpdateRequest
+from ..services.classification import reapply_active_rule_to_matching_transactions
 
 router = APIRouter()
 
@@ -54,6 +55,8 @@ def create_rule(body: RuleCreateRequest, session: SessionDep):
     session.add(rule)
     session.commit()
     session.refresh(rule)
+    reapply_active_rule_to_matching_transactions(session, rule)
+    session.commit()
     return _to_read(rule, cat.name)
 
 
@@ -70,6 +73,9 @@ def update_rule(rule_id: int, body: RuleUpdateRequest, session: SessionDep):
     session.add(rule)
     session.commit()
     session.refresh(rule)
+
+    reapply_active_rule_to_matching_transactions(session, rule)
+    session.commit()
 
     cat = session.get(Category, rule.category_id)
     return _to_read(rule, cat.name)

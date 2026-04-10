@@ -8,13 +8,15 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from ..dependencies import SessionDep
-from ..models import MerchantSpendGroup, MerchantSpendGroupMember, Transaction
+from ..models import MerchantKeyUserApproval, MerchantSpendGroup, MerchantSpendGroupMember, Transaction
+from ..services.merchant_subcategory import ensure_merchant_key_user_approval
 from ..schemas import (
     MerchantSpendGroupCreate,
     MerchantSpendGroupMemberAddResult,
     MerchantSpendGroupMemberCreate,
     MerchantSpendGroupMemberRead,
     MerchantSpendGroupRead,
+    MerchantSpendGroupSyncApprovalsResponse,
     MerchantSpendGroupUpdate,
 )
 
@@ -97,6 +99,29 @@ def create_merchant_spend_group(body: MerchantSpendGroupCreate, session: Session
     return g
 
 
+@router.post(
+    "/sync-approvals",
+    response_model=MerchantSpendGroupSyncApprovalsResponse,
+)
+def sync_spend_group_member_approvals(session: SessionDep):
+    """Create merchant_key_user_approval rows for every distinct spend-group member pattern (idempotent)."""
+    stmt = select(MerchantSpendGroupMember.pattern_key).distinct()
+    keys = [k for k in session.exec(stmt).all() if k]
+    new_count = 0
+    for pk in keys:
+        had = session.exec(
+            select(MerchantKeyUserApproval).where(MerchantKeyUserApproval.pattern_key == pk)
+        ).first()
+        if not had:
+            new_count += 1
+        ensure_merchant_key_user_approval(session, pk)
+    session.commit()
+    return MerchantSpendGroupSyncApprovalsResponse(
+        pattern_keys_processed=len(keys),
+        new_approvals_created=new_count,
+    )
+
+
 @router.patch("/{group_id}", response_model=MerchantSpendGroupRead)
 def update_merchant_spend_group(
     group_id: int,
@@ -173,6 +198,8 @@ def add_group_member(
             raise HTTPException(400, detail="Already in this group")
         m = MerchantSpendGroupMember(group_id=group_id, pattern_key=pk)
         session.add(m)
+        session.flush()
+        ensure_merchant_key_user_approval(session, pk)
         session.commit()
         session.refresh(m)
         return MerchantSpendGroupMemberAddResult(
@@ -209,6 +236,9 @@ def add_group_member(
         session.add(m)
         added_rows.append(m)
 
+    session.flush()
+    for m in added_rows:
+        ensure_merchant_key_user_approval(session, m.pattern_key)
     session.commit()
     for m in added_rows:
         session.refresh(m)

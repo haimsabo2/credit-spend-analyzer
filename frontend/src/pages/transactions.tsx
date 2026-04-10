@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
+import { AlertTriangle } from "lucide-react"
 import type { TransactionRead } from "@/types/api"
 import { useSearchParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -20,7 +21,6 @@ import type { MerchantGroupRow } from "@/types/api"
 import { approveMerchantGroup, unapproveMerchantGroup } from "@/api/transactions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { debugSourceDialog, sourceDialogRowPayload } from "@/lib/source-dialog-debug"
 
 const PAGE_SIZE = 50
 const MONTH_GROUPED_LIMIT = 500
@@ -117,23 +117,11 @@ export default function TransactionsPage() {
   const [sourceTxn, setSourceTxn] = useState<TransactionRead | null>(null)
   const [sourceOpen, setSourceOpen] = useState(false)
 
-  useEffect(() => {
-    debugSourceDialog("state", {
-      sourceOpen,
-      transactionId: sourceTxn?.id ?? null,
-      source_trace_upload_id: sourceTxn?.source_trace_upload_id ?? null,
-    })
-  }, [sourceOpen, sourceTxn])
-
   const columns = useMemo(
     () =>
       getTransactionColumns(t, {
         plainHeaders: true,
         onOpenSource: (row) => {
-          debugSourceDialog("onOpenSource", {
-            ...sourceDialogRowPayload(row),
-            note: "scheduling setState",
-          })
           setSourceTxn(row)
           setSourceOpen(true)
         },
@@ -178,6 +166,16 @@ export default function TransactionsPage() {
     }
     return Array.from(set).sort()
   }, [txns.data])
+
+  const monthCategoryConflictCount = useMemo(
+    () => txns.data?.filter((t) => t.merchant_category_conflict).length ?? 0,
+    [txns.data],
+  )
+  const merchantCategoryConflictCount = useMemo(() => {
+    const p = pendingGroups.data?.items.filter((g) => g.category_conflict).length ?? 0
+    const a = approvedGroups.data?.items.filter((g) => g.category_conflict).length ?? 0
+    return p + a
+  }, [pendingGroups.data, approvedGroups.data])
 
   return (
     <div className="space-y-6">
@@ -224,6 +222,14 @@ export default function TransactionsPage() {
           <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
             {t("transactionsTable.legend")}
           </p>
+          {monthCategoryConflictCount > 0 ? (
+            <p className="flex max-w-3xl items-start gap-2 text-xs text-amber-800 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("transactionsTable.categoryConflictBanner", {
+                count: monthCategoryConflictCount,
+              })}
+            </p>
+          ) : null}
 
           <TransactionsByMonthGroupedTable
             columns={columns}
@@ -240,6 +246,14 @@ export default function TransactionsPage() {
           <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
             {t("merchantGroups.hint")}
           </p>
+          {merchantCategoryConflictCount > 0 ? (
+            <p className="flex max-w-3xl items-start gap-2 text-xs text-amber-800 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("merchantGroups.categoryConflictBanner", {
+                count: merchantCategoryConflictCount,
+              })}
+            </p>
+          ) : null}
 
           <div className="flex flex-wrap items-center gap-2">
             <Input

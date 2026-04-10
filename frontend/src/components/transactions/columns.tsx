@@ -7,13 +7,17 @@ import { SubcategoryCell } from "./subcategory-cell"
 import { SpendPatternCell } from "./spend-pattern-cell"
 import { formatCurrency } from "@/lib/format"
 import { formatTransactionTableDate } from "@/utils/format"
-import { ArrowUpDown, FileSearch } from "lucide-react"
+import { AlertTriangle, ArrowUpDown, FileSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  debugSourceDialog,
-  markSourceDialogClick,
-  sourceDialogRowPayload,
-} from "@/lib/source-dialog-debug"
+
+function sourceButtonHoverTitle(txn: TransactionRead, t: TFunction): string {
+  const file = txn.source_upload_original_filename?.trim()
+  const row = txn.source_row_1based
+  if (file && row != null) return t("transactionSource.hoverTitle", { file, row })
+  if (file) return t("transactionSource.hoverTitleNoRow", { file })
+  if (row != null) return t("transactionSource.hoverTitleNoFile", { row })
+  return t("transactionSource.open")
+}
 
 function SortHeader({
   column,
@@ -64,10 +68,21 @@ export function getTransactionColumns(
             <SortHeader column={column} label={t("transactionsTable.colDescription")} />
           ),
       enableSorting: !plain,
-      cell: ({ getValue }) => (
-        <span className="block max-w-[260px] truncate" title={getValue<string>()}>
-          {getValue<string>()}
-        </span>
+      cell: ({ row, getValue }) => (
+        <div className="flex max-w-[260px] items-start gap-1.5">
+          {row.original.merchant_category_conflict ? (
+            <span
+              className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-500"
+              title={t("transactionsTable.categoryConflictTitle")}
+              aria-label={t("transactionsTable.categoryConflictTitle")}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+            </span>
+          ) : null}
+          <span className="block min-w-0 flex-1 truncate" title={getValue<string>()}>
+            {getValue<string>()}
+          </span>
+        </div>
       ),
       size: 260,
     },
@@ -180,12 +195,8 @@ export function getTransactionColumns(
           variant="ghost"
           size="icon"
           className="h-8 w-8 shrink-0"
-          onClick={(e) => {
-            markSourceDialogClick()
-            debugSourceDialog("click", sourceDialogRowPayload(row.original, e.timeStamp))
-            onSource(row.original)
-          }}
-          title={t("transactionSource.open")}
+          onClick={() => onSource(row.original)}
+          title={sourceButtonHoverTitle(row.original, t)}
         >
           <FileSearch className="h-4 w-4" />
         </Button>

@@ -4,6 +4,7 @@ import type {
   MerchantSpendGroupMemberAddResult,
   MerchantSpendGroupMemberRead,
   MerchantSpendGroupRead,
+  MerchantSpendGroupSyncApprovalsResponse,
 } from "@/types/api"
 
 export async function listMerchantSpendGroups(): Promise<MerchantSpendGroupRead[]> {
@@ -14,6 +15,10 @@ export async function createMerchantSpendGroup(displayName: string): Promise<Mer
   return api.post<MerchantSpendGroupRead>("/merchant-spend-groups", {
     display_name: displayName,
   })
+}
+
+export async function syncSpendGroupApprovals(): Promise<MerchantSpendGroupSyncApprovalsResponse> {
+  return api.post<MerchantSpendGroupSyncApprovalsResponse>("/merchant-spend-groups/sync-approvals")
 }
 
 export async function deleteMerchantSpendGroup(groupId: number): Promise<void> {

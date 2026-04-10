@@ -4,6 +4,7 @@ import type { MerchantGroupRow, TransactionRead } from "@/types/api"
 import { CategoryCell } from "./category-cell"
 import { MerchantGroupSubcategoryCell } from "./merchant-group-subcategory-cell"
 import { formatCurrency } from "@/lib/format"
+import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
@@ -24,6 +25,7 @@ function syntheticTransaction(row: MerchantGroupRow): TransactionRead {
     rule_id_applied: null,
     spend_pattern: "unknown",
     spend_pattern_user_set: false,
+    merchant_category_conflict: row.category_conflict ?? false,
   }
 }
 
@@ -43,14 +45,32 @@ export function getMerchantGroupColumns(
       header: t("transactionsTable.colDescription"),
       cell: ({ row, getValue }) => (
         <div className="max-w-[280px] space-y-0.5">
-          <span className="block truncate" title={getValue<string>()}>
-            {getValue<string>()}
-          </span>
-          {row.original.spend_group_name ? (
-            <Badge variant="outline" className="text-[10px] font-normal">
-              {row.original.spend_group_name}
-            </Badge>
-          ) : null}
+          <div className="flex items-start gap-1.5">
+            {row.original.category_conflict ? (
+              <span
+                className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-500"
+                title={t("transactionsTable.categoryConflictTitle")}
+                aria-label={t("transactionsTable.categoryConflictTitle")}
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+              </span>
+            ) : null}
+            <span className="block min-w-0 flex-1 truncate" title={getValue<string>()}>
+              {getValue<string>()}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {row.original.category_conflict ? (
+              <Badge variant="outline" className="border-amber-600/50 text-[10px] font-normal text-amber-800 dark:text-amber-400">
+                {t("transactionsTable.categoryConflictBadge")}
+              </Badge>
+            ) : null}
+            {row.original.spend_group_name ? (
+              <Badge variant="outline" className="text-[10px] font-normal">
+                {row.original.spend_group_name}
+              </Badge>
+            ) : null}
+          </div>
         </div>
       ),
       size: 280,

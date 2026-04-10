@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
+from backend.app.db import engine
+from backend.app.models import Category, Transaction, Upload
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
 
@@ -121,6 +126,57 @@ def test_categorize_404_for_missing_transaction(client: TestClient):
         json={"category_id": 1},
     )
     assert r.status_code == 404
+
+
+def test_categorize_blank_rule_pattern_falls_back_to_normalized_description(client: TestClient):
+    """Whitespace-only rule_pattern uses normalized merchant key from description (global upsert)."""
+    client.delete("/api/admin/reset")
+    inner = f"pat_{uuid.uuid4().hex[:10]}"
+    desc = f"  {inner}  "
+    sig = f"sig-cat-{uuid.uuid4().hex}"
+
+    with Session(engine) as session:
+        cat_id = session.exec(select(Category).order_by(Category.id)).first().id
+        up = Upload(
+            month="2026-05",
+            original_filename="c.xls",
+            size_bytes=1,
+            file_hash=sig,
+            num_transactions=1,
+        )
+        session.add(up)
+        session.commit()
+        session.refresh(up)
+        session.add(
+            Transaction(
+                upload_id=up.id,
+                description=desc,
+                amount=1.0,
+                row_signature=sig,
+                category_id=None,
+                needs_review=True,
+                confidence=0.3,
+            )
+        )
+        session.commit()
+        tid = session.exec(select(Transaction).where(Transaction.row_signature == sig)).first().id
+
+    r = client.post(
+        f"/api/transactions/{tid}/categorize",
+        json={"category_id": cat_id, "rule_pattern": "   "},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["rule_created"] is True
+    assert data["backfill_count"] >= 1
+
+    row = next(
+        t
+        for t in client.get("/api/transactions", params={"limit": 500}).json()
+        if t["id"] == tid
+    )
+    assert row["category_id"] == cat_id
+    assert row["confidence"] == 1.0
 
 
 # ── Categorize with rule creation ─────────────────────────────────────────

@@ -69,6 +69,30 @@ def test_patch_spend_pattern(seeded_client: TestClient):
     assert body["spend_pattern_user_set"] is True
 
 
+def test_patch_spend_pattern_updates_all_same_merchant_key(seeded_client: TestClient):
+    """PATCH spend-pattern applies to every row with the same normalized description."""
+    all_tx = seeded_client.get("/api/transactions", params={"limit": 500}).json()
+    by_desc: dict[str, list[dict]] = {}
+    for t in all_tx:
+        by_desc.setdefault(t["description"], []).append(t)
+    pair = next((v for v in by_desc.values() if len(v) >= 2), None)
+    if pair is None:
+        pytest.skip("Need two transactions with identical description")
+
+    a, b = pair[0], pair[1]
+    p = seeded_client.patch(
+        f"/api/transactions/{a['id']}/spend-pattern",
+        json={"spend_pattern": "one_time"},
+    )
+    assert p.status_code == 200
+
+    refreshed = {t["id"]: t for t in seeded_client.get("/api/transactions", params={"limit": 500}).json()}
+    assert refreshed[a["id"]]["spend_pattern"] == "one_time"
+    assert refreshed[a["id"]]["spend_pattern_user_set"] is True
+    assert refreshed[b["id"]]["spend_pattern"] == "one_time"
+    assert refreshed[b["id"]]["spend_pattern_user_set"] is True
+
+
 def test_patch_spend_pattern_invalid(seeded_client: TestClient):
     r = seeded_client.get("/api/transactions", params={"limit": 1})
     assert r.status_code == 200

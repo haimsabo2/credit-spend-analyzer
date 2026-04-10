@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
+from sqlalchemy import func as sa_func
 from sqlmodel import Session, func, select
 
 from ..models import ClassificationRule, Subcategory, Transaction
@@ -158,3 +159,62 @@ def upsert_merchant_key_rule_and_propagate(
     )
 
     return new_rule, len(txns)
+
+
+def _transaction_candidates_for_rule(session: Session, rule: ClassificationRule) -> List[Transaction]:
+    """Narrow transactions that might match *rule* (SQL prefilter + optional card scope)."""
+    stmt = select(Transaction)
+    if rule.card_label_filter:
+        stmt = stmt.where(Transaction.card_label == rule.card_label_filter)
+
+    if rule.match_type == "merchant_key":
+        pat = rule.pattern.strip().lower()
+        stmt = stmt.where(func.lower(func.trim(Transaction.description)) == pat)
+        return list(session.exec(stmt).all())
+
+    if rule.match_type == "contains":
+        needle = rule.pattern.lower()
+        stmt = stmt.where(
+            sa_func.instr(
+                func.lower(func.coalesce(Transaction.description, "")),
+                needle,
+            )
+            > 0
+        )
+        return list(session.exec(stmt).all())
+
+    stmt = stmt.where(Transaction.description.isnot(None))  # noqa: E711
+    return list(session.exec(stmt).all())
+
+
+def reapply_active_rule_to_matching_transactions(session: Session, rule: ClassificationRule) -> int:
+    """Set category from *rule* on every transaction where this rule wins (first match by priority).
+
+    Used after Rules API create/update so past months stay aligned with the rule row.
+    Returns number of transactions updated.
+    """
+    if not rule.active or rule.id is None:
+        return 0
+
+    candidates = _transaction_candidates_for_rule(session, rule)
+    updated = 0
+    for txn in candidates:
+        if not _matches(rule, txn):
+            continue
+        winner = find_matching_rule(session, txn)
+        if winner is None or winner.id != rule.id:
+            continue
+        txn.category_id = rule.category_id
+        txn.confidence = 0.9
+        txn.rule_id_applied = rule.id
+        txn.needs_review = False
+        if txn.subcategory_id:
+            sub = session.get(Subcategory, txn.subcategory_id)
+            if not sub or sub.category_id != rule.category_id:
+                txn.subcategory_id = None
+        session.add(txn)
+        updated += 1
+
+    if updated:
+        session.flush()
+    return updated

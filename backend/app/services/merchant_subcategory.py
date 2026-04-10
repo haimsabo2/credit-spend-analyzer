@@ -10,6 +10,28 @@ from ..models import MerchantKeyUserApproval, Subcategory, Transaction
 from ..utils import normalize_merchant_pattern_key
 
 
+def ensure_merchant_key_user_approval(
+    session: Session, raw_description_or_pattern: str
+) -> MerchantKeyUserApproval | None:
+    """Create a user-approval row for this merchant key if missing (idempotent).
+
+    Used when the user explicitly categorizes a line or adds it to a spend group so
+    merchant-group UIs treat the pattern as approved without a separate approve click.
+    """
+    pk = normalize_merchant_pattern_key(raw_description_or_pattern)
+    if not pk:
+        return None
+    row = session.exec(
+        select(MerchantKeyUserApproval).where(MerchantKeyUserApproval.pattern_key == pk)
+    ).first()
+    if row:
+        return row
+    row = MerchantKeyUserApproval(pattern_key=pk)
+    session.add(row)
+    session.flush()
+    return row
+
+
 def transactions_matching_pattern(session: Session, pattern_key: str) -> List[Transaction]:
     pk = normalize_merchant_pattern_key(pattern_key)
     stmt = select(Transaction).where(

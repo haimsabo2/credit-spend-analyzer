@@ -10,15 +10,21 @@ from ..models import MerchantSpendGroup
 from ..schemas import (
     AnomalyItem,
     CardSpend,
+    CardTrendPoint,
+    CardTrendResponse,
     CategoryMonthlyRow,
     CategorySpend,
     CategoryYearMerchantsResponse,
+    DataQualityResponse,
     MerchantGroupSeriesResponse,
     MerchantMonthlySeries,
     MerchantSpend,
     MonthCategorySubcategoriesResponse,
+    RecurringSpendItem,
+    RecurringSpendResponse,
     SubcategoryMonthSlice,
     SummaryResponse,
+    TopUncategorizedMerchant,
     TrendsResponse,
 )
 from ..utils import prior_months as _prior_months
@@ -772,3 +778,239 @@ def get_anomalies(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-
 
     anomalies.sort(key=lambda a: a.delta, reverse=True)
     return anomalies
+
+
+# ── GET /api/insights/recurring-spend ──────────────────────────────────────
+
+@router.get("/recurring-spend", response_model=RecurringSpendResponse)
+def get_recurring_spend(
+    session: SessionDep,
+    trailing_months: int = Query(6, ge=3, le=24),
+):
+    max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
+    if not max_row or max_row.m is None:
+        return RecurringSpendResponse(
+            items=[], total_monthly_recurring=0, total_annual_estimate=0, window_months=trailing_months,
+        )
+    month_labels = trailing_calendar_months_ending_at(max_row.m, trailing_months)
+    months_in = ",".join(f"'{m}'" for m in month_labels)
+
+    rows = session.execute(
+        text(f"""
+            SELECT merchant_key,
+                   display_name,
+                   months_present,
+                   avg_amount,
+                   total_amount,
+                   first_seen,
+                   last_seen,
+                   category_name,
+                   category_id
+            FROM (
+                SELECT COALESCE(g.display_name, lower(trim(t.description))) AS merchant_key,
+                       COALESCE(MAX(g.display_name), MIN(t.description))    AS display_name,
+                       COUNT(DISTINCT u.month)                              AS months_present,
+                       CAST(SUM(t.amount) AS REAL) / COUNT(DISTINCT u.month) AS avg_amount,
+                       SUM(t.amount)                                        AS total_amount,
+                       MIN(u.month)                                         AS first_seen,
+                       MAX(u.month)                                         AS last_seen,
+                       MAX(c.name)                                          AS category_name,
+                       MAX(t.category_id)                                   AS category_id
+                FROM   "transaction" t
+                JOIN   upload u ON t.upload_id = u.id
+                LEFT JOIN merchant_spend_group_member m
+                       ON lower(trim(t.description)) = m.pattern_key
+                LEFT JOIN merchant_spend_group g ON m.group_id = g.id
+                LEFT JOIN category c ON t.category_id = c.id
+                WHERE  u.month IN ({months_in})
+                GROUP  BY merchant_key
+                HAVING months_present >= 3
+            ) recurring
+            ORDER BY avg_amount DESC
+        """),
+    ).all()
+
+    items: list[RecurringSpendItem] = []
+    total_monthly = 0.0
+    last_month = month_labels[-1] if month_labels else ""
+    first_possible = month_labels[2] if len(month_labels) > 2 else month_labels[0] if month_labels else ""
+
+    for r in rows:
+        avg = round(r.avg_amount, 2)
+        total_monthly += avg
+        if r.first_seen >= first_possible:
+            trend = "new"
+        elif r.months_present >= trailing_months - 1:
+            trend = "stable"
+        else:
+            trend = "stable"
+
+        items.append(RecurringSpendItem(
+            merchant_key=r.merchant_key,
+            display_name=r.display_name,
+            avg_amount=avg,
+            months_present=r.months_present,
+            total_months_in_window=trailing_months,
+            total_amount=round(r.total_amount, 2),
+            first_seen=r.first_seen,
+            last_seen=r.last_seen,
+            trend=trend,
+            category_name=r.category_name,
+            category_id=r.category_id,
+        ))
+
+    return RecurringSpendResponse(
+        items=items,
+        total_monthly_recurring=round(total_monthly, 2),
+        total_annual_estimate=round(total_monthly * 12, 2),
+        window_months=trailing_months,
+    )
+
+
+# ── GET /api/insights/data-quality ─────────────────────────────────────────
+
+@router.get("/data-quality", response_model=DataQualityResponse)
+def get_data_quality(
+    session: SessionDep,
+    month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+):
+    where_month = ""
+    params: dict = {}
+    if month:
+        where_month = "AND u.month = :month"
+        params = {"month": month}
+
+    counts = session.execute(
+        text(f"""
+            SELECT COUNT(*)                                                 AS total,
+                   SUM(CASE WHEN t.category_id IS NOT NULL THEN 1 ELSE 0 END) AS categorized,
+                   SUM(CASE WHEN t.category_id IS NULL THEN 1 ELSE 0 END)     AS uncategorized,
+                   SUM(CASE WHEN t.confidence >= 0.8 THEN 1 ELSE 0 END)       AS high_conf,
+                   SUM(CASE WHEN t.confidence >= 0.3 AND t.confidence < 0.8 THEN 1 ELSE 0 END) AS med_conf,
+                   SUM(CASE WHEN t.confidence < 0.3 THEN 1 ELSE 0 END)        AS low_conf,
+                   SUM(CASE WHEN t.needs_review = 1 THEN 1 ELSE 0 END)        AS needs_review
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  1=1 {where_month}
+        """),
+        params,
+    ).one()
+
+    total = int(counts.total or 0)
+    categorized = int(counts.categorized or 0)
+    uncategorized = int(counts.uncategorized or 0)
+
+    top_uncat = session.execute(
+        text(f"""
+            SELECT t.description,
+                   SUM(t.amount)  AS total_amount,
+                   COUNT(*)       AS occurrence_count
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  t.category_id IS NULL {where_month}
+            GROUP  BY t.description
+            ORDER  BY total_amount DESC
+            LIMIT  10
+        """),
+        params,
+    ).all()
+
+    return DataQualityResponse(
+        total_transactions=total,
+        categorized_count=categorized,
+        uncategorized_count=uncategorized,
+        coverage_pct=round(categorized * 100.0 / total, 1) if total > 0 else 0.0,
+        high_confidence_count=int(counts.high_conf or 0),
+        medium_confidence_count=int(counts.med_conf or 0),
+        low_confidence_count=int(counts.low_conf or 0),
+        needs_review_count=int(counts.needs_review or 0),
+        top_uncategorized_merchants=[
+            TopUncategorizedMerchant(
+                description=r.description,
+                total_amount=round(r.total_amount, 2),
+                occurrence_count=r.occurrence_count,
+            )
+            for r in top_uncat
+        ],
+    )
+
+
+# ── GET /api/insights/card-trends ──────────────────────────────────────────
+
+@router.get("/card-trends", response_model=List[CardTrendResponse])
+def get_card_trends(
+    session: SessionDep,
+    trailing_months: int = Query(12, ge=1, le=24),
+):
+    max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
+    if not max_row or max_row.m is None:
+        return []
+    month_labels = trailing_calendar_months_ending_at(max_row.m, trailing_months)
+    months_in = ",".join(f"'{m}'" for m in month_labels)
+
+    cards = session.execute(
+        text(f"""
+            SELECT t.card_label,
+                   SUM(t.amount)  AS total_amount,
+                   COUNT(*)       AS txn_count
+            FROM   "transaction" t
+            JOIN   upload u ON t.upload_id = u.id
+            WHERE  u.month IN ({months_in})
+            GROUP  BY t.card_label
+            ORDER  BY total_amount DESC
+        """),
+    ).all()
+
+    result: list[CardTrendResponse] = []
+    for card in cards:
+        monthly = session.execute(
+            text(f"""
+                SELECT u.month, SUM(t.amount) AS amount
+                FROM   "transaction" t
+                JOIN   upload u ON t.upload_id = u.id
+                WHERE  u.month IN ({months_in})
+                  AND  t.card_label {'IS NULL' if card.card_label is None else '= :cl'}
+                GROUP  BY u.month
+                ORDER  BY u.month
+            """),
+            {"cl": card.card_label} if card.card_label is not None else {},
+        ).all()
+        lookup = {r.month: float(r.amount) for r in monthly}
+        trend = [CardTrendPoint(month=m, amount=lookup.get(m, 0.0)) for m in month_labels]
+
+        cat_rows = session.execute(
+            text(f"""
+                SELECT COALESCE(c.name, 'Uncategorized') AS category_name,
+                       t.category_id,
+                       SUM(t.amount) AS amount
+                FROM   "transaction" t
+                JOIN   upload u ON t.upload_id = u.id
+                LEFT JOIN category c ON t.category_id = c.id
+                WHERE  u.month IN ({months_in})
+                  AND  t.card_label {'IS NULL' if card.card_label is None else '= :cl'}
+                GROUP  BY category_name, t.category_id
+                ORDER  BY amount DESC
+                LIMIT  8
+            """),
+            {"cl": card.card_label} if card.card_label is not None else {},
+        ).all()
+        total_for_pct = float(card.total_amount) if card.total_amount else 1.0
+        top_cats = [
+            CategorySpend(
+                category_id=r.category_id,
+                category_name=r.category_name,
+                amount=round(float(r.amount), 2),
+                pct=round(float(r.amount) * 100.0 / total_for_pct, 1),
+            )
+            for r in cat_rows
+        ]
+
+        result.append(CardTrendResponse(
+            card_label=card.card_label or "(unknown)",
+            total_amount=round(float(card.total_amount), 2),
+            transaction_count=int(card.txn_count),
+            monthly_trend=trend,
+            top_categories=top_cats,
+        ))
+
+    return result

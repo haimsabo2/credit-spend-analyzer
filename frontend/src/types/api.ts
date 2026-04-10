@@ -84,6 +84,8 @@ export interface TransactionRead {
   source_upload_original_filename?: string | null
   source_stored_file_available?: boolean
   source_cells?: string[] | null
+  /** Same normalized merchant as other rows but different category_id (or mix with uncategorized). */
+  merchant_category_conflict?: boolean
 }
 
 export interface CategorizeRequest {
@@ -134,6 +136,11 @@ export interface MerchantSpendGroupMemberRead {
   pattern_key: string
 }
 
+export interface MerchantSpendGroupSyncApprovalsResponse {
+  pattern_keys_processed: number
+  new_approvals_created: number
+}
+
 export interface MerchantSpendGroupMemberAddResult {
   bulk: boolean
   added: MerchantSpendGroupMemberRead[]
@@ -157,6 +164,7 @@ export interface MerchantGroupRow {
   subcategory_id?: number | null
   needs_review_any: boolean
   spend_group_name?: string | null
+  category_conflict?: boolean
 }
 
 export interface MerchantGroupListResponse {
