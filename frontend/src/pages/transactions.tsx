@@ -37,9 +37,25 @@ export default function TransactionsPage() {
   const [filters, setFilters] = useState<FilterValues>(() => ({
     ...EMPTY_FILTERS,
     q: searchParams.get("q") ?? "",
+    missing_card_label: searchParams.get("missing_card") === "1" ? "true" : "",
   }))
   const [pagePending, setPagePending] = useState(0)
   const [pageApproved, setPageApproved] = useState(0)
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("missing_card") === "1"
+    if (fromUrl) setViewMode("month")
+    setFilters((prev) => {
+      if (fromUrl) {
+        if (prev.missing_card_label === "true" && prev.card_label === "") return prev
+        return { ...prev, missing_card_label: "true", card_label: "" }
+      }
+      if (prev.missing_card_label === "true") {
+        return { ...prev, missing_card_label: "" }
+      }
+      return prev
+    })
+  }, [searchParams])
 
   useEffect(() => {
     setPagePending(0)
@@ -51,6 +67,7 @@ export default function TransactionsPage() {
       setFilters(f)
       const sp = new URLSearchParams()
       if (f.q) sp.set("q", f.q)
+      if (f.missing_card_label === "true") sp.set("missing_card", "1")
       setSearchParams(sp, { replace: true })
     },
     [setSearchParams],
@@ -64,7 +81,8 @@ export default function TransactionsPage() {
     }
     if (filters.q) p.q = filters.q
     if (filters.category_id) p.category_id = Number(filters.category_id)
-    if (filters.card_label) p.card_label = filters.card_label
+    if (filters.missing_card_label === "true") p.missing_card_label = true
+    else if (filters.card_label) p.card_label = filters.card_label
     if (filters.section) p.section = filters.section
     if (filters.needs_review === "true") p.needs_review = true
     else if (filters.needs_review === "false") p.needs_review = false

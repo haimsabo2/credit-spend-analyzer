@@ -3,6 +3,7 @@ import type { TFunction } from "i18next"
 import type { TransactionRead } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { CategoryCell } from "./category-cell"
+import { CardLabelCell } from "./card-label-cell"
 import { SubcategoryCell } from "./subcategory-cell"
 import { SpendPatternCell } from "./spend-pattern-cell"
 import { formatCurrency } from "@/lib/format"
@@ -135,15 +136,8 @@ export function getTransactionColumns(
     {
       accessorKey: "card_label",
       header: t("transactionsTable.colCard"),
-      cell: ({ getValue }) => (
-        <span
-          className="block max-w-[140px] truncate text-muted-foreground"
-          title={getValue<string | null>() ?? ""}
-        >
-          {getValue<string | null>() ?? "--"}
-        </span>
-      ),
-      size: 140,
+      cell: ({ row }) => <CardLabelCell transaction={row.original} />,
+      size: 168,
       enableSorting: false,
     },
     {

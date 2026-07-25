@@ -26,7 +26,9 @@ from ..schemas import (
     MerchantGroupRow,
     SpendPatternUpdate,
     TransactionRead,
+    TransactionCardLabelPatch,
     TransactionSubcategoryPatch,
+    UncategorizeResponse,
 )
 from ..services.batch_categorize import (
     REASON_PENDING_MANUAL_OR_AI,
@@ -41,6 +43,11 @@ from ..services.merchant_subcategory import (
 from ..services.spend_pattern import ALLOWED_SPEND_PATTERNS
 from ..services.classification import upsert_merchant_key_rule_and_propagate
 from ..services.merchant_category_conflict import merchant_category_conflict_pattern_keys
+from ..services.merchant_spend_group_filter import (
+    clear_needs_review_if_spend_group_member,
+    spend_group_display_names_by_pattern_keys,
+    transaction_not_in_merchant_spend_group_clause,
+)
 from ..utils import normalize_merchant_pattern_key
 
 logger = logging.getLogger(__name__)
@@ -80,6 +87,9 @@ def transaction_to_read(
             r.source_stored_file_available = bool(u.stored_path)
     pk = normalize_merchant_pattern_key(t.description)
     r.merchant_category_conflict = bool(pk and pk in ck)
+    if t.category_id is None and pk:
+        sg = spend_group_display_names_by_pattern_keys(session, {pk})
+        r.spend_group_name = sg.get(pk)
     return r
 
 
@@ -93,6 +103,13 @@ def transactions_to_reads(session: Session, rows: Iterable[Transaction]) -> list
     conflict_keys = (
         merchant_category_conflict_pattern_keys(session) if txs else frozenset()
     )
+    need_sg: set[str] = set()
+    for t in txs:
+        if t.category_id is None:
+            pk0 = normalize_merchant_pattern_key(t.description)
+            if pk0:
+                need_sg.add(pk0)
+    sg_map = spend_group_display_names_by_pattern_keys(session, need_sg)
     out: list[TransactionRead] = []
     for t in txs:
         r = TransactionRead.model_validate(t)
@@ -104,6 +121,8 @@ def transactions_to_reads(session: Session, rows: Iterable[Transaction]) -> list
             r.source_stored_file_available = bool(u.stored_path)
         pk = normalize_merchant_pattern_key(t.description)
         r.merchant_category_conflict = bool(pk and pk in conflict_keys)
+        if t.category_id is None and pk:
+            r.spend_group_name = sg_map.get(pk)
         out.append(r)
     return out
 
@@ -127,9 +146,10 @@ WITH grp AS (
     COUNT(*) AS occurrence_count,
     SUM(t.amount) AS total_amount,
     MAX(t.id) AS representative_transaction_id,
-    MAX(CASE WHEN t.needs_review THEN 1 ELSE 0 END) AS needs_review_int
+    MAX(CASE WHEN msgm.id IS NOT NULL THEN 0 WHEN t.needs_review THEN 1 ELSE 0 END) AS needs_review_int
   FROM "transaction" t
   INNER JOIN upload u ON t.upload_id = u.id
+  LEFT JOIN merchant_spend_group_member msgm ON msgm.pattern_key = lower(trim(t.description))
   WHERE 1=1 {search_clause}
   GROUP BY lower(trim(t.description))
 )"""
@@ -247,7 +267,11 @@ def pending_categorization_count(session: Session, month: str) -> int:
         select(func.count())
         .select_from(Transaction)
         .join(Upload, Transaction.upload_id == Upload.id)
-        .where(Upload.month == month, _pending_auto_categorize_clause())
+        .where(
+            Upload.month == month,
+            _pending_auto_categorize_clause(),
+            transaction_not_in_merchant_spend_group_clause(),
+        )
     )
     return int(session.exec(stmt).one())
 
@@ -260,6 +284,7 @@ def llm_pending_uncategorized_count(session: Session, month: str) -> int:
         .where(
             Upload.month == month,
             Transaction.category_id == None,  # noqa: E711
+            transaction_not_in_merchant_spend_group_clause(),
         )
     )
     return int(session.exec(stmt).one())
@@ -270,10 +295,17 @@ def get_transactions(
     session: SessionDep,
     month: str | None = Query(None, description="Filter by upload month YYYY-MM"),
     card_label: str | None = Query(None, description="Filter by card label"),
+    missing_card_label: bool = Query(
+        False,
+        description="When true, only transactions with no card label (NULL or empty string)",
+    ),
     section: str | None = Query(None, description="Filter by section e.g. IL, FOREIGN"),
     needs_review: bool | None = Query(
         None,
-        description="true = uncategorized (category_id IS NULL), false = categorized",
+        description=(
+            "true = uncategorized (category_id IS NULL), excluding lines in a merchant spend group; "
+            "false = categorized"
+        ),
     ),
     category_id: int | None = Query(None, description="Filter by category id"),
     subcategory_id: int | None = Query(None, description="Filter by subcategory id"),
@@ -290,16 +322,31 @@ def get_transactions(
     """List transactions with optional filters, text search, and pagination."""
     if spend_pattern is not None and spend_pattern not in ALLOWED_SPEND_PATTERNS:
         raise HTTPException(422, detail="spend_pattern must be unknown, recurring, or one_time")
+    if missing_card_label and card_label is not None:
+        raise HTTPException(
+            422,
+            detail="Do not pass card_label together with missing_card_label=true",
+        )
     stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id)
 
     if month is not None:
         stmt = stmt.where(Upload.month == month)
-    if card_label is not None:
+    if missing_card_label:
+        stmt = stmt.where(
+            or_(
+                Transaction.card_label.is_(None),
+                Transaction.card_label == "",
+            )
+        )
+    elif card_label is not None:
         stmt = stmt.where(Transaction.card_label == card_label)
     if section is not None:
         stmt = stmt.where(Transaction.section == section)
     if needs_review is True:
-        stmt = stmt.where(Transaction.category_id == None)  # noqa: E711
+        stmt = stmt.where(
+            Transaction.category_id == None,  # noqa: E711
+            transaction_not_in_merchant_spend_group_clause(),
+        )
     elif needs_review is False:
         stmt = stmt.where(Transaction.category_id != None)  # noqa: E711
     if category_id is not None:
@@ -324,6 +371,33 @@ def get_transactions(
     stmt = stmt.offset(offset).limit(limit)
     transactions = session.exec(stmt).all()
     return transactions_to_reads(session, transactions)
+
+
+@router.get("/card-labels", response_model=list[str])
+def list_distinct_card_labels(
+    session: SessionDep,
+    month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+):
+    """Distinct non-empty card_label values, optionally scoped to one upload month."""
+    stmt = (
+        select(Transaction.card_label)
+        .distinct()
+        .select_from(Transaction)
+        .join(Upload, Transaction.upload_id == Upload.id)
+        .where(
+            Transaction.card_label.isnot(None),
+            func.length(func.trim(Transaction.card_label)) > 0,
+        )
+    )
+    if month is not None:
+        stmt = stmt.where(Upload.month == month)
+    rows = session.exec(stmt).all()
+    labels: set[str] = set()
+    for row in rows:
+        v = row[0] if isinstance(row, tuple) else row
+        if v is not None and str(v).strip():
+            labels.add(str(v).strip())
+    return sorted(labels)
 
 
 @router.get("/merchant-groups", response_model=MerchantGroupListResponse)
@@ -602,6 +676,54 @@ def categorize_transaction(
     )
 
 
+def _clear_transaction_categorization(t: Transaction) -> None:
+    """Return row to manual-review uncategorized state (same spirit as unmatched rules)."""
+    t.category_id = None
+    t.subcategory_id = None
+    t.rule_id_applied = None
+    t.confidence = 0.3
+    t.needs_review = True
+    t.reason_he = None
+
+
+@router.post("/{transaction_id}/uncategorize", response_model=UncategorizeResponse)
+def uncategorize_transaction(
+    transaction_id: int,
+    session: SessionDep,
+    same_merchant: bool = Query(
+        False,
+        description="If true, clear category on every transaction with the same normalized description",
+    ),
+):
+    """Set category to none (uncategorized). Use when resolving merchant_category_conflict."""
+    txn = session.get(Transaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, detail="Transaction not found")
+
+    if same_merchant:
+        pk = normalize_merchant_pattern_key(txn.description)
+        if pk:
+            stmt = select(Transaction).where(
+                func.lower(func.trim(Transaction.description)) == pk
+            )
+            rows = list(session.exec(stmt).all())
+        else:
+            rows = [txn]
+    else:
+        rows = [txn]
+
+    for t in rows:
+        _clear_transaction_categorization(t)
+        clear_needs_review_if_spend_group_member(session, t)
+        session.add(t)
+    session.commit()
+
+    return UncategorizeResponse(
+        transaction_id=txn.id,
+        updated_count=len(rows),
+    )
+
+
 @router.patch("/{transaction_id}/spend-pattern", response_model=TransactionRead)
 def update_spend_pattern(
     transaction_id: int,
@@ -686,6 +808,26 @@ def patch_transaction_subcategory(
     return transaction_to_read(session, txn)
 
 
+@router.patch("/{transaction_id}/card-label", response_model=TransactionRead)
+def patch_transaction_card_label(
+    transaction_id: int,
+    body: TransactionCardLabelPatch,
+    session: SessionDep,
+):
+    txn = session.get(Transaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, detail="Transaction not found")
+    if body.card_label is None:
+        txn.card_label = None
+    else:
+        stripped = body.card_label.strip()
+        txn.card_label = stripped or None
+    session.add(txn)
+    session.commit()
+    session.refresh(txn)
+    return transaction_to_read(session, txn)
+
+
 @router.post("/auto-categorize", response_model=AutoCategorizeSummary)
 def auto_categorize(
     session: SessionDep,
@@ -711,6 +853,7 @@ def auto_categorize(
         stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id).where(
             Upload.month == month,
             _pending_auto_categorize_clause(),
+            transaction_not_in_merchant_spend_group_clause(),
         )
     txns = list(session.exec(stmt).all())
     return batch_categorize_transactions(session, txns)
@@ -751,6 +894,7 @@ def llm_categorize_pending(
         .where(
             Upload.month == month,
             Transaction.category_id == None,  # noqa: E711
+            transaction_not_in_merchant_spend_group_clause(),
         )
         .order_by(Transaction.id.asc())
         .limit(limit)
@@ -818,6 +962,7 @@ def get_needs_review(
         .where(
             Upload.month == month,
             Transaction.needs_review == True,  # noqa: E712
+            transaction_not_in_merchant_spend_group_clause(),
         )
         .order_by(Transaction.id.desc())
         .offset(offset)

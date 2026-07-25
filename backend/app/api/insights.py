@@ -120,14 +120,26 @@ def _category_monthly_full(session, month_labels: list[str]) -> list[CategoryMon
     rows = session.execute(
         text(f"""
             SELECT u.month,
-                   t.category_id,
-                   COALESCE(c.name, 'Uncategorized') AS category_name,
+                   MAX(t.category_id) AS category_id,
+                   MAX(CASE
+                     WHEN t.category_id IS NOT NULL THEN COALESCE(c.name, 'Uncategorized')
+                     WHEN g.id IS NOT NULL THEN g.display_name
+                     ELSE 'Uncategorized'
+                   END) AS category_name,
                    SUM(t.amount) AS total
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
             LEFT JOIN category c ON t.category_id = c.id
+            LEFT JOIN merchant_spend_group_member m
+                   ON lower(trim(t.description)) = m.pattern_key
+            LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             WHERE  u.month IN ({months_list})
-            GROUP  BY u.month, t.category_id, category_name
+            GROUP  BY u.month,
+                     CASE
+                       WHEN t.category_id IS NOT NULL THEN 'c:' || CAST(t.category_id AS TEXT)
+                       WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                       ELSE 'u'
+                     END
         """),
     ).all()
     if not rows:
@@ -177,16 +189,20 @@ def _category_year_merchant_breakdown(
         text(f"""
             SELECT u.month,
                    SUM(t.amount) AS total,
-                   COALESCE(MAX(g.display_name), MIN(t.description)) AS merchant_label
+                   COALESCE(MAX(g.display_name), MAX(COALESCE(c.name, 'Uncategorized'))) AS merchant_label
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN category c ON t.category_id = c.id
             LEFT JOIN merchant_spend_group_member m
                    ON lower(trim(t.description)) = m.pattern_key
             LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             WHERE  u.month IN ({months_list})
               AND  {where_cat}
             GROUP  BY u.month,
-                     COALESCE(CAST(g.id AS TEXT), lower(trim(t.description)))
+                     CASE
+                       WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                       ELSE 'c:' || COALESCE(CAST(t.category_id AS TEXT), 'null')
+                     END
         """),
         params,
     ).all()
@@ -243,26 +259,30 @@ def _category_year_subcategory_breakdown(
         where_cat = "t.category_id = :cid"
         params = {"cid": category_id}
 
-    bucket_expr = """
+    bucket_key = """
         CASE
-          WHEN t.subcategory_id IS NOT NULL THEN s.name
-          WHEN t.category_id IS NULL THEN 'Uncategorized'
-          ELSE COALESCE(c.name, 'Uncategorized')
+          WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+          WHEN t.subcategory_id IS NOT NULL THEN 's:' || CAST(t.subcategory_id AS TEXT)
+          WHEN t.category_id IS NULL THEN 'u:null'
+          ELSE 'c:' || CAST(t.category_id AS TEXT)
         END
     """
 
     rows = session.execute(
         text(f"""
             SELECT u.month,
-                   {bucket_expr} AS bucket_label,
+                   COALESCE(MAX(g.display_name), MAX(s.name), MAX(c.name), 'Uncategorized') AS bucket_label,
                    SUM(t.amount) AS total
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN merchant_spend_group_member m
+                   ON lower(trim(t.description)) = m.pattern_key
+            LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             LEFT JOIN subcategory s ON t.subcategory_id = s.id
             LEFT JOIN category c ON t.category_id = c.id
             WHERE  u.month IN ({months_list})
               AND  {where_cat}
-            GROUP  BY u.month, {bucket_expr}
+            GROUP  BY u.month, {bucket_key}
         """),
         params,
     ).all()
@@ -319,14 +339,25 @@ def get_summary(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-\d
 
     cat_rows = session.execute(
         text("""
-            SELECT t.category_id,
-                   COALESCE(c.name, 'Uncategorized') AS category_name,
+            SELECT MAX(t.category_id) AS category_id,
+                   MAX(CASE
+                     WHEN t.category_id IS NOT NULL THEN COALESCE(c.name, 'Uncategorized')
+                     WHEN g.id IS NOT NULL THEN g.display_name
+                     ELSE 'Uncategorized'
+                   END) AS category_name,
                    SUM(t.amount) AS amount
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
             LEFT JOIN category c ON t.category_id = c.id
+            LEFT JOIN merchant_spend_group_member m
+                   ON lower(trim(t.description)) = m.pattern_key
+            LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             WHERE  u.month = :month
-            GROUP  BY t.category_id, category_name
+            GROUP  BY CASE
+                       WHEN t.category_id IS NOT NULL THEN 'c:' || CAST(t.category_id AS TEXT)
+                       WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                       ELSE 'u'
+                     END
             ORDER  BY amount DESC
         """),
         {"month": month},
@@ -358,16 +389,20 @@ def get_summary(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-\d
 
     merch_rows = session.execute(
         text("""
-            SELECT COALESCE(MAX(g.display_name), MIN(t.description)) AS display_name,
+            SELECT COALESCE(MAX(g.display_name), MAX(COALESCE(c.name, 'Uncategorized'))) AS display_name,
                    SUM(t.amount) AS amount,
                    COUNT(*) AS txn_count
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN category c ON t.category_id = c.id
             LEFT JOIN merchant_spend_group_member m
                    ON lower(trim(t.description)) = m.pattern_key
             LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             WHERE  u.month = :month
-            GROUP  BY COALESCE(CAST(g.id AS TEXT), lower(trim(t.description)))
+            GROUP  BY CASE
+                       WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                       ELSE 'c:' || COALESCE(CAST(t.category_id AS TEXT), 'null')
+                     END
             ORDER  BY amount DESC
             LIMIT  10
         """),
@@ -579,24 +614,28 @@ def get_month_category_subcategories(
         where_cat = "t.category_id = :cid"
         params = {"month": month, "cid": category_id}
 
-    bucket_expr = """
+    bucket_key = """
         CASE
-          WHEN t.subcategory_id IS NOT NULL THEN s.name
-          WHEN t.category_id IS NULL THEN 'Uncategorized'
-          ELSE COALESCE(c.name, 'Uncategorized')
+          WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+          WHEN t.subcategory_id IS NOT NULL THEN 's:' || CAST(t.subcategory_id AS TEXT)
+          WHEN t.category_id IS NULL THEN 'u:null'
+          ELSE 'c:' || CAST(t.category_id AS TEXT)
         END
     """
     rows = session.execute(
         text(f"""
-            SELECT {bucket_expr} AS label,
+            SELECT COALESCE(MAX(g.display_name), MAX(s.name), MAX(c.name), 'Uncategorized') AS label,
                    SUM(t.amount) AS amount
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
+            LEFT JOIN merchant_spend_group_member m
+                   ON lower(trim(t.description)) = m.pattern_key
+            LEFT JOIN merchant_spend_group g ON m.group_id = g.id
             LEFT JOIN subcategory s ON t.subcategory_id = s.id
             LEFT JOIN category c ON t.category_id = c.id
             WHERE  u.month = :month
               AND  {where_cat}
-            GROUP  BY {bucket_expr}
+            GROUP  BY {bucket_key}
             ORDER  BY amount DESC
         """),
         params,
@@ -682,13 +721,24 @@ def get_anomalies(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-
         r.category_name: r.amount
         for r in session.execute(
             text("""
-                SELECT COALESCE(c.name, 'Uncategorized') AS category_name,
-                       SUM(t.amount) AS amount
-                FROM   "transaction" t
-                JOIN   upload u ON t.upload_id = u.id
-                LEFT JOIN category c ON t.category_id = c.id
-                WHERE  u.month = :month
-                GROUP  BY category_name
+                SELECT cat_label AS category_name,
+                       SUM(amt) AS amount
+                FROM (
+                  SELECT t.amount AS amt,
+                         CASE
+                           WHEN t.category_id IS NOT NULL THEN COALESCE(c.name, 'Uncategorized')
+                           WHEN g.id IS NOT NULL THEN g.display_name
+                           ELSE 'Uncategorized'
+                         END AS cat_label
+                  FROM   "transaction" t
+                  JOIN   upload u ON t.upload_id = u.id
+                  LEFT JOIN category c ON t.category_id = c.id
+                  LEFT JOIN merchant_spend_group_member m
+                         ON lower(trim(t.description)) = m.pattern_key
+                  LEFT JOIN merchant_spend_group g ON m.group_id = g.id
+                  WHERE  u.month = :month
+                ) x
+                GROUP BY cat_label
             """),
             {"month": month},
         ).all()
@@ -700,14 +750,26 @@ def get_anomalies(session: SessionDep, month: str = Query(..., pattern=r"^\d{4}-
             text("""
                 SELECT category_name, AVG(monthly_total) AS avg_amount
                 FROM (
-                    SELECT COALESCE(c.name, 'Uncategorized') AS category_name,
-                           u.month,
-                           SUM(t.amount) AS monthly_total
-                    FROM   "transaction" t
-                    JOIN   upload u ON t.upload_id = u.id
-                    LEFT JOIN category c ON t.category_id = c.id
-                    WHERE  u.month IN ({prior_list})
-                    GROUP  BY category_name, u.month
+                    SELECT cat_label AS category_name,
+                           mth,
+                           SUM(amt) AS monthly_total
+                    FROM (
+                      SELECT u.month AS mth,
+                             t.amount AS amt,
+                             CASE
+                               WHEN t.category_id IS NOT NULL THEN COALESCE(c.name, 'Uncategorized')
+                               WHEN g.id IS NOT NULL THEN g.display_name
+                               ELSE 'Uncategorized'
+                             END AS cat_label
+                      FROM   "transaction" t
+                      JOIN   upload u ON t.upload_id = u.id
+                      LEFT JOIN category c ON t.category_id = c.id
+                      LEFT JOIN merchant_spend_group_member m
+                             ON lower(trim(t.description)) = m.pattern_key
+                      LEFT JOIN merchant_spend_group g ON m.group_id = g.id
+                      WHERE  u.month IN ({prior_list})
+                    ) y
+                    GROUP BY cat_label, mth
                 ) sub
                 GROUP BY category_name
             """.format(prior_list=",".join(f"'{m}'" for m in prior))),
@@ -807,8 +869,11 @@ def get_recurring_spend(
                    category_name,
                    category_id
             FROM (
-                SELECT COALESCE(g.display_name, lower(trim(t.description))) AS merchant_key,
-                       COALESCE(MAX(g.display_name), MIN(t.description))    AS display_name,
+                SELECT CASE
+                         WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                         ELSE 'c:' || COALESCE(CAST(t.category_id AS TEXT), 'null')
+                       END AS merchant_key,
+                       COALESCE(MAX(g.display_name), MAX(COALESCE(c.name, 'Uncategorized'))) AS display_name,
                        COUNT(DISTINCT u.month)                              AS months_present,
                        CAST(SUM(t.amount) AS REAL) / COUNT(DISTINCT u.month) AS avg_amount,
                        SUM(t.amount)                                        AS total_amount,
@@ -823,7 +888,10 @@ def get_recurring_spend(
                 LEFT JOIN merchant_spend_group g ON m.group_id = g.id
                 LEFT JOIN category c ON t.category_id = c.id
                 WHERE  u.month IN ({months_in})
-                GROUP  BY merchant_key
+                GROUP  BY CASE
+                            WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                            ELSE 'c:' || COALESCE(CAST(t.category_id AS TEXT), 'null')
+                          END
                 HAVING months_present >= 3
             ) recurring
             ORDER BY avg_amount DESC
@@ -883,12 +951,23 @@ def get_data_quality(
     counts = session.execute(
         text(f"""
             SELECT COUNT(*)                                                 AS total,
-                   SUM(CASE WHEN t.category_id IS NOT NULL THEN 1 ELSE 0 END) AS categorized,
-                   SUM(CASE WHEN t.category_id IS NULL THEN 1 ELSE 0 END)     AS uncategorized,
+                   SUM(CASE WHEN t.category_id IS NOT NULL
+                         OR EXISTS (
+                           SELECT 1 FROM merchant_spend_group_member msgm
+                           WHERE msgm.pattern_key = lower(trim(t.description))
+                         ) THEN 1 ELSE 0 END) AS categorized,
+                   SUM(CASE WHEN t.category_id IS NULL
+                         AND NOT EXISTS (
+                           SELECT 1 FROM merchant_spend_group_member msgm
+                           WHERE msgm.pattern_key = lower(trim(t.description))
+                         ) THEN 1 ELSE 0 END) AS uncategorized,
                    SUM(CASE WHEN t.confidence >= 0.8 THEN 1 ELSE 0 END)       AS high_conf,
                    SUM(CASE WHEN t.confidence >= 0.3 AND t.confidence < 0.8 THEN 1 ELSE 0 END) AS med_conf,
                    SUM(CASE WHEN t.confidence < 0.3 THEN 1 ELSE 0 END)        AS low_conf,
-                   SUM(CASE WHEN t.needs_review = 1 THEN 1 ELSE 0 END)        AS needs_review
+                   SUM(CASE WHEN t.needs_review = 1 AND NOT EXISTS (
+                     SELECT 1 FROM merchant_spend_group_member msgm
+                     WHERE msgm.pattern_key = lower(trim(t.description))
+                   ) THEN 1 ELSE 0 END) AS needs_review
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
             WHERE  1=1 {where_month}
@@ -907,7 +986,12 @@ def get_data_quality(
                    COUNT(*)       AS occurrence_count
             FROM   "transaction" t
             JOIN   upload u ON t.upload_id = u.id
-            WHERE  t.category_id IS NULL {where_month}
+            WHERE  t.category_id IS NULL
+              AND  NOT EXISTS (
+                SELECT 1 FROM merchant_spend_group_member msgm
+                WHERE msgm.pattern_key = lower(trim(t.description))
+              )
+              {where_month}
             GROUP  BY t.description
             ORDER  BY total_amount DESC
             LIMIT  10
@@ -980,15 +1064,26 @@ def get_card_trends(
 
         cat_rows = session.execute(
             text(f"""
-                SELECT COALESCE(c.name, 'Uncategorized') AS category_name,
-                       t.category_id,
-                       SUM(t.amount) AS amount
+                SELECT MAX(CASE
+                     WHEN t.category_id IS NOT NULL THEN COALESCE(c.name, 'Uncategorized')
+                     WHEN g.id IS NOT NULL THEN g.display_name
+                     ELSE 'Uncategorized'
+                   END) AS category_name,
+                   MAX(t.category_id) AS category_id,
+                   SUM(t.amount) AS amount
                 FROM   "transaction" t
                 JOIN   upload u ON t.upload_id = u.id
                 LEFT JOIN category c ON t.category_id = c.id
+                LEFT JOIN merchant_spend_group_member m
+                       ON lower(trim(t.description)) = m.pattern_key
+                LEFT JOIN merchant_spend_group g ON m.group_id = g.id
                 WHERE  u.month IN ({months_in})
                   AND  t.card_label {'IS NULL' if card.card_label is None else '= :cl'}
-                GROUP  BY category_name, t.category_id
+                GROUP  BY CASE
+                           WHEN t.category_id IS NOT NULL THEN 'c:' || CAST(t.category_id AS TEXT)
+                           WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                           ELSE 'u'
+                         END
                 ORDER  BY amount DESC
                 LIMIT  8
             """),

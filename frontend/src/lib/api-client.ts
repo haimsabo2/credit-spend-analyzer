@@ -116,8 +116,12 @@ export const api = {
   get<T>(path: string, params?: Record<string, string | number | boolean | undefined>) {
     return request<T>("GET", path, { params })
   },
-  post<T>(path: string, body?: unknown) {
-    return request<T>("POST", path, { body })
+  post<T>(
+    path: string,
+    body?: unknown,
+    params?: Record<string, string | number | boolean | undefined>,
+  ) {
+    return request<T>("POST", path, { body, params })
   },
   put<T>(path: string, body?: unknown) {
     return request<T>("PUT", path, { body })

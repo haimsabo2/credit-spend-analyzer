@@ -61,21 +61,33 @@ def get_forecast(
 
     cat_rows = session.execute(
         text("""
-            SELECT category_id,
-                   COALESCE(category_name, 'Uncategorized') AS category_name,
+            SELECT MAX(category_id) AS category_id,
+                   category_name,
                    AVG(month_total) AS amount
             FROM (
-                SELECT t.category_id,
-                       c.name AS category_name,
+                SELECT MAX(t.category_id) AS category_id,
+                       MAX(CASE
+                         WHEN t.category_id IS NOT NULL THEN COALESCE(c.name, 'Uncategorized')
+                         WHEN g.id IS NOT NULL THEN g.display_name
+                         ELSE 'Uncategorized'
+                       END) AS category_name,
                        u.month,
                        SUM(t.amount) AS month_total
                 FROM   "transaction" t
                 JOIN   upload u ON t.upload_id = u.id
                 LEFT JOIN category c ON t.category_id = c.id
+                LEFT JOIN merchant_spend_group_member m
+                       ON lower(trim(t.description)) = m.pattern_key
+                LEFT JOIN merchant_spend_group g ON m.group_id = g.id
                 WHERE  u.month IN ({months})
-                GROUP  BY t.category_id, c.name, u.month
+                GROUP  BY CASE
+                           WHEN t.category_id IS NOT NULL THEN 'c:' || CAST(t.category_id AS TEXT)
+                           WHEN g.id IS NOT NULL THEN 'g:' || CAST(g.id AS TEXT)
+                           ELSE 'u'
+                         END,
+                         u.month
             ) sub
-            GROUP  BY category_id, category_name
+            GROUP  BY category_name
             ORDER  BY amount DESC
         """.format(months=",".join(f"'{m}'" for m in last_6))),
     ).all()

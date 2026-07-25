@@ -4,6 +4,7 @@ import type {
   MerchantGroupActionBody,
   MerchantGroupListResponse,
   TransactionRead,
+  UncategorizeResponse,
 } from "@/types/api"
 
 export async function listTransactions(month: string, limit = 500, offset = 0): Promise<Transaction[]> {
@@ -70,6 +71,19 @@ export async function patchTransactionSubcategory(
   })
 }
 
+export async function listCardLabels(month: string): Promise<string[]> {
+  return api.get<string[]>("/api/transactions/card-labels", { month })
+}
+
+export async function patchTransactionCardLabel(
+  transactionId: number,
+  cardLabel: string | null,
+): Promise<TransactionRead> {
+  return api.patch<TransactionRead>(`/api/transactions/${transactionId}/card-label`, {
+    card_label: cardLabel,
+  })
+}
+
 export async function getNeedsReview(month: string, limit = 500): Promise<Transaction[]> {
   return api.get<Transaction[]>("/transactions/needs-review", { month, limit })
 }
@@ -93,6 +107,17 @@ export async function categorizeTransaction(
   body: CategorizeRequest,
 ): Promise<CategorizeResponse> {
   return api.post<CategorizeResponse>(`/transactions/${transactionId}/categorize`, body)
+}
+
+export async function uncategorizeTransaction(
+  transactionId: number,
+  sameMerchant = false,
+): Promise<UncategorizeResponse> {
+  return api.post<UncategorizeResponse>(
+    `/api/transactions/${transactionId}/uncategorize`,
+    undefined,
+    { same_merchant: sameMerchant },
+  )
 }
 
 export async function autoCategorize(

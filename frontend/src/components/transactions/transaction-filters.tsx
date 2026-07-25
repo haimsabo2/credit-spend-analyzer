@@ -14,11 +14,14 @@ import {
 } from "@/components/ui/select"
 import { Search, X } from "lucide-react"
 
+export const MISSING_CARD_FILTER_VALUE = "___missing_card___"
+
 export interface FilterValues {
   q: string
   category_id: string
   subcategory_id: string
   card_label: string
+  missing_card_label: string
   section: string
   needs_review: string
   spend_pattern: string
@@ -31,6 +34,7 @@ export const EMPTY_FILTERS: FilterValues = {
   category_id: "",
   subcategory_id: "",
   card_label: "",
+  missing_card_label: "",
   section: "",
   needs_review: "",
   spend_pattern: "",
@@ -144,12 +148,30 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
         </SelectContent>
       </Select>
 
-      <Select value={filters.card_label || "all"} onValueChange={(v) => update({ card_label: v === "all" ? "" : v })}>
+      <Select
+        value={
+          filters.missing_card_label === "true"
+            ? MISSING_CARD_FILTER_VALUE
+            : filters.card_label || "all"
+        }
+        onValueChange={(v) => {
+          if (v === "all") {
+            update({ card_label: "", missing_card_label: "" })
+          } else if (v === MISSING_CARD_FILTER_VALUE) {
+            update({ card_label: "", missing_card_label: "true" })
+          } else {
+            update({ card_label: v, missing_card_label: "" })
+          }
+        }}
+      >
         <SelectTrigger className="w-40">
           <SelectValue placeholder={t("transactionsTable.filterCardPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">{t("transactionsTable.allCards")}</SelectItem>
+          <SelectItem value={MISSING_CARD_FILTER_VALUE}>
+            {t("transactionsTable.filterCardMissing")}
+          </SelectItem>
           {cardLabels.map((l) => (
             <SelectItem key={l} value={l}>
               {l.length > 20 ? l.slice(0, 20) + "..." : l}

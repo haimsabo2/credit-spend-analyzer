@@ -16,6 +16,7 @@ export interface Transaction {
   meta_json?: string | null
   spend_pattern?: string
   spend_pattern_user_set?: boolean
+  spend_group_name?: string | null
 }
 
 export interface CategorizeRequest {

@@ -99,6 +99,7 @@ class TransactionRead(SQLModel):
     source_stored_file_available: bool = False
     source_cells: Optional[List[str]] = None
     merchant_category_conflict: bool = False
+    spend_group_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -157,6 +158,11 @@ class CategorizeResponse(SQLModel):
     rule_created: bool
     rule_id: Optional[int]
     backfill_count: int
+
+
+class UncategorizeResponse(SQLModel):
+    transaction_id: int
+    updated_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +366,12 @@ class SubcategoryUpdate(SQLModel):
 
 class TransactionSubcategoryPatch(SQLModel):
     subcategory_id: Optional[int] = None
+
+
+class TransactionCardLabelPatch(SQLModel):
+    """Set statement card label; null clears it (unknown card in imports)."""
+
+    card_label: str | None
 
 
 # ---------------------------------------------------------------------------

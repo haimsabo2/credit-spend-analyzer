@@ -86,6 +86,8 @@ export interface TransactionRead {
   source_cells?: string[] | null
   /** Same normalized merchant as other rows but different category_id (or mix with uncategorized). */
   merchant_category_conflict?: boolean
+  /** When category_id is null and line belongs to a merchant spend group — display name of that group. */
+  spend_group_name?: string | null
 }
 
 export interface CategorizeRequest {
@@ -103,9 +105,15 @@ export interface CategorizeResponse {
   backfill_count: number
 }
 
+export interface UncategorizeResponse {
+  transaction_id: number
+  updated_count: number
+}
+
 export interface TransactionQueryParams {
   month?: string
   card_label?: string
+  missing_card_label?: boolean
   section?: string
   category_id?: number
   subcategory_id?: number

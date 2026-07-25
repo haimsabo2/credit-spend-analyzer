@@ -22,6 +22,7 @@ from .categorizer import categorize_transaction as llm_categorize
 from .categorizer import categorize_transactions_batch
 from .categorizer import transaction_llm_dedupe_key
 from .dictionary_rules import dictionary_categorize
+from .merchant_spend_group_filter import clear_needs_review_if_spend_group_member
 from .merchant_subcategory import apply_approved_subcategory_to_transactions
 from .spend_pattern_refresh import refresh_auto_spend_patterns
 
@@ -165,6 +166,7 @@ def _run_llm_categorization_core(
             if len(failures_sample) < _MAX_FAILURE_SAMPLES:
                 failures_sample.append(f"tx {tx_id}: missing LLM result")
             txn.needs_review = True
+            clear_needs_review_if_spend_group_member(session, txn)
             session.add(txn)
             continue
         result, err = pair
@@ -173,6 +175,7 @@ def _run_llm_categorization_core(
             if len(failures_sample) < _MAX_FAILURE_SAMPLES:
                 failures_sample.append(f"tx {tx_id}: {err}")
             txn.needs_review = True
+            clear_needs_review_if_spend_group_member(session, txn)
             session.add(txn)
             continue
         if result is None:
@@ -180,6 +183,7 @@ def _run_llm_categorization_core(
             if len(failures_sample) < _MAX_FAILURE_SAMPLES:
                 failures_sample.append(f"tx {tx_id}: empty LLM result")
             txn.needs_review = True
+            clear_needs_review_if_spend_group_member(session, txn)
             session.add(txn)
             continue
 
@@ -212,6 +216,8 @@ def _run_llm_categorization_core(
                     ensure_ascii=False,
                 )
                 txn.needs_review = True
+
+            clear_needs_review_if_spend_group_member(session, txn)
 
             session.add(txn)
             logger.info("tx %s -> llm (%s)", tx_id, result.category_name_he)
@@ -376,6 +382,7 @@ def batch_categorize_transactions(
             if len(failures_sample) < _MAX_FAILURE_SAMPLES:
                 failures_sample.append(f"tx {txn.id}: {exc}")
             txn.needs_review = True
+            clear_needs_review_if_spend_group_member(session, txn)
             session.add(txn)
 
     llm_ready = [t for t in llm_needed if t.id not in refresh_failed]
@@ -405,8 +412,11 @@ def batch_categorize_transactions(
                 txn.reason_he = REASON_PENDING_MANUAL_OR_AI
                 txn.confidence = 0.0
                 txn.rule_id_applied = None
+                clear_needs_review_if_spend_group_member(session, txn)
                 session.add(txn)
-            needs_review_count += len(llm_ready)
+            needs_review_count += sum(
+                1 for t in llm_ready if t.needs_review
+            )
             session.commit()
     else:
         _progress_emit(progress_sink, "classification_local", rows=processed)

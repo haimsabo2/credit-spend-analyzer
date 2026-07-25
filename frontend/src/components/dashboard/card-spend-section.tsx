@@ -23,6 +23,11 @@ import {
 } from "@/components/ui/select"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import { useState } from "react"
+import { Link } from "react-router-dom"
+import { ExternalLink } from "lucide-react"
+
+/** Must match API `get_card_trends` placeholder for NULL `card_label`. */
+const CARD_TREND_UNKNOWN_LABEL = "(unknown)"
 
 interface CardTrendPoint {
   month: string
@@ -99,9 +104,18 @@ export function CardSpendSection() {
         {data.map((card) => (
           <Card key={card.card_label}>
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center justify-between text-sm">
-                <span className="truncate">{card.card_label}</span>
-                <div className="flex shrink-0 items-center gap-2">
+              <CardTitle className="flex items-center justify-between gap-2 text-sm">
+                <span className="min-w-0 truncate">{card.card_label}</span>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {card.card_label === CARD_TREND_UNKNOWN_LABEL ? (
+                    <Link
+                      to="/transactions?missing_card=1"
+                      className="inline-flex items-center gap-1 text-[10px] font-medium text-primary underline-offset-4 hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" aria-hidden />
+                      {t("cardTrends.viewNoCardTransactions")}
+                    </Link>
+                  ) : null}
                   <Badge variant="outline" className="text-[10px] tabular-nums">
                     {card.transaction_count} {t("cardTrends.transactions")}
                   </Badge>
@@ -128,7 +142,7 @@ export function CardSpendSection() {
                     <XAxis dataKey="label" tick={{ fontSize: 9 }} interval={0} />
                     <YAxis hide />
                     <Tooltip
-                      formatter={(v: number) => formatCurrency(v)}
+                      formatter={(v) => formatCurrency(typeof v === "number" ? v : 0)}
                       contentStyle={{ fontSize: 11 }}
                     />
                     <Bar dataKey="amount" fill="var(--color-chart-1)" radius={[3, 3, 0, 0]} />

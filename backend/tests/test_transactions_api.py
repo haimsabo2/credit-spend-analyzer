@@ -6,6 +6,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
+from backend.app.db import engine
+from backend.app.models import Transaction
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
 
@@ -129,6 +133,80 @@ def test_get_transactions_filter_by_section(seeded_client: TestClient):
     assert isinstance(data, list)
     for t in data:
         assert t.get("section") == "IL"
+
+
+def test_get_transactions_missing_card_label_conflicts_with_card_label(
+    seeded_client: TestClient,
+):
+    r = seeded_client.get(
+        "/api/transactions",
+        params={"missing_card_label": True, "card_label": "AnyCard", "limit": 5},
+    )
+    assert r.status_code == 422
+
+
+def test_get_transactions_filter_missing_card_label(seeded_client: TestClient):
+    with Session(engine) as session:
+        t = session.exec(select(Transaction).limit(1)).first()
+        if t is None:
+            pytest.skip("No transactions")
+        orig_label = t.card_label
+        t.card_label = None
+        session.add(t)
+        session.commit()
+        session.refresh(t)
+        tid = t.id
+
+    try:
+        r = seeded_client.get(
+            "/api/transactions",
+            params={"missing_card_label": True, "limit": 500},
+        )
+        assert r.status_code == 200
+        rows = r.json()
+        assert any(row["id"] == tid for row in rows)
+        for row in rows:
+            assert row.get("card_label") in (None, "")
+    finally:
+        with Session(engine) as session:
+            t2 = session.get(Transaction, tid)
+            if t2 is not None:
+                t2.card_label = orig_label
+                session.add(t2)
+                session.commit()
+
+
+def test_list_card_labels(seeded_client: TestClient):
+    r = seeded_client.get("/api/transactions/card-labels", params={"month": "2026-04"})
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+    assert all(isinstance(x, str) and x.strip() for x in data)
+
+
+def test_patch_transaction_card_label(seeded_client: TestClient):
+    all_tx = seeded_client.get("/api/transactions", params={"limit": 1}).json()
+    if not all_tx:
+        pytest.skip("No transactions")
+    tid = all_tx[0]["id"]
+    orig = all_tx[0].get("card_label")
+    p = seeded_client.patch(
+        f"/api/transactions/{tid}/card-label",
+        json={"card_label": "Test Card Label Edit"},
+    )
+    assert p.status_code == 200
+    assert p.json()["card_label"] == "Test Card Label Edit"
+    clear = seeded_client.patch(
+        f"/api/transactions/{tid}/card-label",
+        json={"card_label": None},
+    )
+    assert clear.status_code == 200
+    assert clear.json().get("card_label") in (None, "")
+    restore = seeded_client.patch(
+        f"/api/transactions/{tid}/card-label",
+        json={"card_label": orig},
+    )
+    assert restore.status_code == 200
 
 
 def test_get_transactions_filter_by_card_label(seeded_client: TestClient):

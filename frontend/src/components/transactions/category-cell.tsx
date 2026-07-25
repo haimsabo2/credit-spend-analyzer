@@ -5,6 +5,7 @@ import type { TransactionRead } from "@/types/api"
 import { useCategories } from "@/hooks/use-categories"
 import { useCategorize } from "@/hooks/use-categorize"
 import { createCategory } from "@/api/categories"
+import { uncategorizeTransaction } from "@/api/transactions"
 import {
   Select,
   SelectContent,
@@ -38,6 +39,29 @@ export function CategoryCell({ transaction }: Props) {
     [categories],
   )
 
+  const uncategorizeMutation = useMutation({
+    mutationFn: (sameMerchant: boolean) =>
+      uncategorizeTransaction(transaction.id, sameMerchant),
+    onSuccess(data) {
+      qc.invalidateQueries({ queryKey: ["transactions"] })
+      qc.invalidateQueries({ queryKey: ["needs-review"] })
+      qc.invalidateQueries({ queryKey: ["merchant-groups"] })
+      qc.invalidateQueries({ queryKey: ["summary"] })
+      qc.invalidateQueries({ queryKey: ["trends"] })
+      qc.invalidateQueries({ queryKey: ["card-trends"] })
+      qc.invalidateQueries({ queryKey: ["month-category-subcategories"] })
+      qc.invalidateQueries({ queryKey: ["category-year-merchants"] })
+      qc.invalidateQueries({ queryKey: ["category-year-subcategories"] })
+      qc.invalidateQueries({ queryKey: ["anomalies"] })
+      qc.invalidateQueries({ queryKey: ["data-quality"] })
+      qc.invalidateQueries({ queryKey: ["recurring-spend"] })
+      toast.success(t("transactionsTable.uncategorizeSuccess", { count: data.updated_count }))
+    },
+    onError() {
+      toast.error(t("transactionsTable.uncategorizeError"))
+    },
+  })
+
   const createCategoryMutation = useMutation({
     mutationFn: (name: string) => createCategory(name.trim()),
     onSuccess(cat) {
@@ -56,8 +80,13 @@ export function CategoryCell({ transaction }: Props) {
 
   const currentValue = transaction.category_id != null ? String(transaction.category_id) : ""
   const selectValue = otherMode ? OTHER_VALUE : currentValue || undefined
+  const spendGroupOnly =
+    transaction.category_id == null && Boolean(transaction.spend_group_name?.trim())
 
-  const busy = categorize.isPending || createCategoryMutation.isPending
+  const busy =
+    categorize.isPending ||
+    createCategoryMutation.isPending ||
+    uncategorizeMutation.isPending
 
   function handleValueChange(value: string) {
     if (value === OTHER_VALUE) {
@@ -96,7 +125,13 @@ export function CategoryCell({ transaction }: Props) {
     >
       <Select value={selectValue} onValueChange={handleValueChange}>
           <SelectTrigger size="sm" className="h-7 w-full max-w-36 text-xs">
-            <SelectValue placeholder={t("transactionsTable.uncategorized")} />
+            <SelectValue
+              placeholder={
+                spendGroupOnly
+                  ? (transaction.spend_group_name ?? "")
+                  : t("transactionsTable.uncategorized")
+              }
+            />
           </SelectTrigger>
           <SelectContent>
             {categoriesForSelect.map((cat) => (
@@ -107,6 +142,35 @@ export function CategoryCell({ transaction }: Props) {
             <SelectItem value={OTHER_VALUE}>{t("review.other")}</SelectItem>
           </SelectContent>
       </Select>
+      {transaction.merchant_category_conflict ? (
+        <div className="flex flex-col gap-1 pt-0.5">
+          <p className="text-[10px] leading-tight text-amber-700 dark:text-amber-500">
+            {t("transactionsTable.uncategorizeConflictHint")}
+          </p>
+          <div className="flex flex-wrap gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-[10px]"
+              disabled={busy}
+              onClick={() => uncategorizeMutation.mutate(true)}
+            >
+              {t("transactionsTable.uncategorizeConflictAll")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-[10px]"
+              disabled={busy}
+              onClick={() => uncategorizeMutation.mutate(false)}
+            >
+              {t("transactionsTable.uncategorizeConflictRow")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {otherMode ? (
         <div className="flex flex-wrap items-center gap-1">
           <Input

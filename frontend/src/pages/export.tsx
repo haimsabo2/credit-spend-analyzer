@@ -40,7 +40,11 @@ function buildCSV(txns: TransactionRead[], categoryMap: Map<number, string>): st
     t.currency ?? "",
     t.spend_pattern ?? "unknown",
     t.spend_pattern_user_set ? "Yes" : "No",
-    escapeCSV(t.category_id != null ? categoryMap.get(t.category_id) ?? "" : ""),
+    escapeCSV(
+      t.category_id != null
+        ? (categoryMap.get(t.category_id) ?? "")
+        : (t.spend_group_name?.trim() ?? ""),
+    ),
     escapeCSV(t.card_label),
     escapeCSV(t.section),
     t.needs_review ? "Yes" : "No",
@@ -81,7 +85,9 @@ export default function ExportPage() {
     categoryMap.set(c.id, c.name)
   }
 
-  const categorized = data.filter((t) => t.category_id != null).length
+  const categorized = data.filter(
+    (t) => t.category_id != null || Boolean(t.spend_group_name?.trim()),
+  ).length
   const uncategorized = data.length - categorized
   const total = data.reduce((sum, t) => sum + t.amount, 0)
 
