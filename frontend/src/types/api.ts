@@ -122,6 +122,7 @@ export interface TransactionQueryParams {
   amount_min?: number
   amount_max?: number
   spend_pattern?: string
+  spend_group_id?: number
   limit?: number
   offset?: number
 }

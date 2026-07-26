@@ -53,6 +53,15 @@ def _months_inclusive_range(first_ym: str, last_ym: str) -> list[str]:
     return out
 
 
+def _month_labels_from_range(from_month: str, to_month: str) -> list[str]:
+    if from_month > to_month:
+        raise HTTPException(
+            status_code=422,
+            detail="from_month must be on or before to_month",
+        )
+    return _months_inclusive_range(from_month, to_month)
+
+
 def _calendar_year_month_labels_with_data_span(session, year: int) -> list[str]:
     """First month in *year* with any transaction through last (gaps kept as zero columns)."""
     start_m = f"{year}-01"
@@ -470,6 +479,16 @@ def get_trends(
     session: SessionDep,
     months: int = Query(12, ge=1, le=60),
     year: Optional[int] = Query(None, ge=1990, le=2100),
+    from_month: Optional[str] = Query(
+        None,
+        pattern=r"^\d{4}-\d{2}$",
+        description="Inclusive range start (YYYY-MM); requires to_month",
+    ),
+    to_month: Optional[str] = Query(
+        None,
+        pattern=r"^\d{4}-\d{2}$",
+        description="Inclusive range end (YYYY-MM); requires from_month",
+    ),
     trailing_calendar_months: Optional[int] = Query(
         None,
         ge=1,
@@ -477,6 +496,15 @@ def get_trends(
         description="Trailing N calendar months ending at MAX(upload.month); ignores year and months",
     ),
 ):
+    if from_month is not None or to_month is not None:
+        if from_month is None or to_month is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Provide both from_month and to_month",
+            )
+        month_labels = _month_labels_from_range(from_month, to_month)
+        return _trends_for_month_labels(session, month_labels)
+
     if trailing_calendar_months is not None:
         max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
         if not max_row or max_row.m is None:
@@ -538,6 +566,8 @@ def get_trends(
 def get_category_year_merchants(
     session: SessionDep,
     year: Optional[int] = Query(None, ge=1990, le=2100),
+    from_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    to_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
     trailing_calendar_months: Optional[int] = Query(
         None,
         ge=1,
@@ -549,18 +579,13 @@ def get_category_year_merchants(
         description="Category id; omit for uncategorized (category_id IS NULL)",
     ),
 ):
-    if trailing_calendar_months is not None:
-        max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
-        if not max_row or max_row.m is None:
-            return CategoryYearMerchantsResponse(months=[], merchants=[])
-        month_labels = trailing_calendar_months_ending_at(max_row.m, trailing_calendar_months)
-        return _category_year_merchant_breakdown(session, month_labels, category_id)
-    if year is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Provide either year or trailing_calendar_months",
-        )
-    month_labels = _calendar_year_month_labels_with_data_span(session, year)
+    month_labels = _category_scope_month_labels(
+        session,
+        year=year,
+        trailing_calendar_months=trailing_calendar_months,
+        from_month=from_month,
+        to_month=to_month,
+    )
     if not month_labels:
         return CategoryYearMerchantsResponse(months=[], merchants=[])
     return _category_year_merchant_breakdown(session, month_labels, category_id)
@@ -570,6 +595,8 @@ def get_category_year_merchants(
 def get_category_year_subcategories(
     session: SessionDep,
     year: Optional[int] = Query(None, ge=1990, le=2100),
+    from_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    to_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
     trailing_calendar_months: Optional[int] = Query(
         None,
         ge=1,
@@ -581,18 +608,13 @@ def get_category_year_subcategories(
         description="Category id; omit for uncategorized (category_id IS NULL)",
     ),
 ):
-    if trailing_calendar_months is not None:
-        max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
-        if not max_row or max_row.m is None:
-            return CategoryYearMerchantsResponse(months=[], merchants=[])
-        month_labels = trailing_calendar_months_ending_at(max_row.m, trailing_calendar_months)
-        return _category_year_subcategory_breakdown(session, month_labels, category_id)
-    if year is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Provide either year or trailing_calendar_months",
-        )
-    month_labels = _calendar_year_month_labels_with_data_span(session, year)
+    month_labels = _category_scope_month_labels(
+        session,
+        year=year,
+        trailing_calendar_months=trailing_calendar_months,
+        from_month=from_month,
+        to_month=to_month,
+    )
     if not month_labels:
         return CategoryYearMerchantsResponse(months=[], merchants=[])
     return _category_year_subcategory_breakdown(session, month_labels, category_id)
@@ -651,7 +673,16 @@ def _month_labels_for_merchant_series(
     session,
     year: Optional[int],
     trailing_calendar_months: Optional[int],
+    from_month: Optional[str] = None,
+    to_month: Optional[str] = None,
 ) -> list[str]:
+    if from_month is not None or to_month is not None:
+        if from_month is None or to_month is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Provide both from_month and to_month",
+            )
+        return _month_labels_from_range(from_month, to_month)
     if trailing_calendar_months is not None:
         max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
         if not max_row or max_row.m is None:
@@ -664,11 +695,41 @@ def _month_labels_for_merchant_series(
     return _calendar_year_month_labels_with_data_span(session, year)
 
 
+def _category_scope_month_labels(
+    session,
+    *,
+    year: Optional[int],
+    trailing_calendar_months: Optional[int],
+    from_month: Optional[str],
+    to_month: Optional[str],
+) -> list[str]:
+    if from_month is not None or to_month is not None:
+        if from_month is None or to_month is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Provide both from_month and to_month",
+            )
+        return _month_labels_from_range(from_month, to_month)
+    if trailing_calendar_months is not None:
+        max_row = session.execute(text("SELECT MAX(month) AS m FROM upload")).first()
+        if not max_row or max_row.m is None:
+            return []
+        return trailing_calendar_months_ending_at(max_row.m, trailing_calendar_months)
+    if year is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide year, trailing_calendar_months, or from_month and to_month",
+        )
+    return _calendar_year_month_labels_with_data_span(session, year)
+
+
 @router.get("/merchant-group-series", response_model=MerchantGroupSeriesResponse)
 def get_merchant_group_series(
     session: SessionDep,
     group_id: int = Query(..., ge=1),
     year: Optional[int] = Query(None, ge=1990, le=2100),
+    from_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    to_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
     trailing_calendar_months: Optional[int] = Query(
         None,
         ge=1,
@@ -678,13 +739,12 @@ def get_merchant_group_series(
 ):
     if not session.get(MerchantSpendGroup, group_id):
         raise HTTPException(404, detail="Group not found")
-    if trailing_calendar_months is None and year is None:
-        raise HTTPException(
-            422,
-            detail="Provide either year or trailing_calendar_months",
-        )
-    month_labels = _month_labels_for_merchant_series(
-        session, year, trailing_calendar_months
+    month_labels = _category_scope_month_labels(
+        session,
+        year=year,
+        trailing_calendar_months=trailing_calendar_months,
+        from_month=from_month,
+        to_month=to_month,
     )
     if not month_labels:
         return MerchantGroupSeriesResponse(months=[], amounts=[])

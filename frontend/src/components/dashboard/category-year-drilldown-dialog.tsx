@@ -156,7 +156,9 @@ export function CategoryYearDrilldownDialog({
   const scopeKey =
     "year" in merchantsScope
       ? `y:${merchantsScope.year}`
-      : `t:${merchantsScope.trailingCalendarMonths}`
+      : "trailingCalendarMonths" in merchantsScope
+        ? `t:${merchantsScope.trailingCalendarMonths}`
+        : `r:${merchantsScope.fromMonth}:${merchantsScope.toMonth}`
   const { data, isLoading, isError } = useQuery({
     queryKey: ["category-year-merchants", scopeKey, categoryId],
     queryFn: () => getCategoryYearMerchants(categoryId, merchantsScope),
@@ -188,7 +190,9 @@ export function CategoryYearDrilldownDialog({
     () =>
       "year" in merchantsScope
         ? { year: merchantsScope.year }
-        : { trailingCalendarMonths: merchantsScope.trailingCalendarMonths },
+        : "trailingCalendarMonths" in merchantsScope
+          ? { trailingCalendarMonths: merchantsScope.trailingCalendarMonths }
+          : { fromMonth: merchantsScope.fromMonth, toMonth: merchantsScope.toMonth },
     [merchantsScope],
   )
 

@@ -65,6 +65,16 @@ def test_create_group_and_member(seeded_client: TestClient):
     pks_ok = {x["pattern_key"] for x in appr["items"]}
     assert pk in pks_ok
 
+    filtered = seeded_client.get(
+        "/api/transactions",
+        params={"spend_group_id": gid, "limit": 500},
+    )
+    assert filtered.status_code == 200
+    rows = filtered.json()
+    assert len(rows) >= 1
+    for row in rows:
+        assert (row["description"] or "").strip().lower() == pk
+
 
 def test_sync_spend_group_approvals(seeded_client: TestClient):
     g = seeded_client.post(

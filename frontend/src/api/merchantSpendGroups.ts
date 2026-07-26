@@ -45,15 +45,23 @@ export async function removeGroupMember(groupId: number, memberId: number): Prom
   await api.del(`/merchant-spend-groups/${groupId}/members/${memberId}`)
 }
 
+export type MerchantGroupSeriesScope =
+  | { year: number }
+  | { trailingCalendarMonths: number }
+  | { fromMonth: string; toMonth: string }
+
 export async function getMerchantGroupSeries(
   groupId: number,
-  scope: { year: number } | { trailingCalendarMonths: number },
+  scope: MerchantGroupSeriesScope,
 ): Promise<MerchantGroupSeriesResponse> {
-  const params: Record<string, number> = { group_id: groupId }
+  const params: Record<string, number | string> = { group_id: groupId }
   if ("year" in scope) {
     params.year = scope.year
-  } else {
+  } else if ("trailingCalendarMonths" in scope) {
     params.trailing_calendar_months = scope.trailingCalendarMonths
+  } else {
+    params.from_month = scope.fromMonth
+    params.to_month = scope.toMonth
   }
   return api.get<MerchantGroupSeriesResponse>("/insights/merchant-group-series", params)
 }

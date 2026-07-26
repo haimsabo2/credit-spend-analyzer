@@ -12,7 +12,7 @@ from sqlalchemy import and_, or_, text
 from sqlmodel import Session, func, select
 
 from ..dependencies import SessionDep
-from ..models import MerchantKeyUserApproval, Subcategory, Transaction, Upload
+from ..models import MerchantKeyUserApproval, MerchantSpendGroup, Subcategory, Transaction, Upload
 from ..schemas import (
     AutoCategorizeChunkResponse,
     AutoCategorizeSummary,
@@ -46,6 +46,7 @@ from ..services.merchant_category_conflict import merchant_category_conflict_pat
 from ..services.merchant_spend_group_filter import (
     clear_needs_review_if_spend_group_member,
     spend_group_display_names_by_pattern_keys,
+    transaction_in_spend_group_clause,
     transaction_not_in_merchant_spend_group_clause,
 )
 from ..utils import normalize_merchant_pattern_key
@@ -316,6 +317,11 @@ def get_transactions(
         None,
         description="Filter by spend pattern: unknown, recurring, one_time",
     ),
+    spend_group_id: int | None = Query(
+        None,
+        ge=1,
+        description="Only transactions whose description matches a member of this spend group",
+    ),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
@@ -327,6 +333,8 @@ def get_transactions(
             422,
             detail="Do not pass card_label together with missing_card_label=true",
         )
+    if spend_group_id is not None and not session.get(MerchantSpendGroup, spend_group_id):
+        raise HTTPException(404, detail="Spend group not found")
     stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id)
 
     if month is not None:
@@ -359,6 +367,8 @@ def get_transactions(
         stmt = stmt.where(Transaction.amount <= amount_max)
     if spend_pattern is not None:
         stmt = stmt.where(Transaction.spend_pattern == spend_pattern)
+    if spend_group_id is not None:
+        stmt = stmt.where(transaction_in_spend_group_clause(spend_group_id))
     if q:
         stmt = stmt.where(
             or_(

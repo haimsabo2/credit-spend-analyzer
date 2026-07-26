@@ -46,11 +46,21 @@ import {
 } from "@/components/ui/table"
 import type { CategoryMonthlyRow, SummaryResponse } from "@/api/types"
 import { ApiError } from "@/api/client"
-import { getSummary, getTrailingOverview, getYearOverview } from "@/api/insights"
+import { getSummary, getRangeOverview } from "@/api/insights"
 import { getNeedsReview } from "@/api/transactions"
 import { listTransactions } from "@/api/transactions"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import { priorMonth } from "@/utils/month"
+import {
+  DEFAULT_FISCAL_START_YEAR,
+  defaultFiscalDetailMonth,
+  fiscalPeriodSelectValue,
+  fiscalYearMonths,
+  fiscalYearSelectOptions,
+  formatFiscalYearLabel,
+  monthInFiscalYear,
+  parseFiscalPeriodSelectValue,
+} from "@/utils/fiscal-year"
 import { isBackendUnreachable } from "@/utils/api-reachability"
 
 const EMPTY_SUMMARY: SummaryResponse = {
@@ -73,11 +83,6 @@ const CHART_COLORS = [
   "oklch(0.55 0.15 180)",
 ]
 
-const MIN_DASHBOARD_YEAR = 2020
-
-/** Select value for trailing 12 calendar months (not a calendar year). */
-const PERIOD_TRAILING12 = "__trailing12__"
-
 type AnnualChartRow = {
   ym: string
   label: string
@@ -95,13 +100,6 @@ function monthOverMonthPctChange(prevTotal: number, currTotal: number): number |
 function formatMomPctForDisplay(pct: number): string {
   const sign = pct > 0 ? "+" : ""
   return `${sign}${pct.toFixed(1)}%`
-}
-
-function yearSelectOptions(): number[] {
-  const cy = new Date().getFullYear()
-  const out: number[] = []
-  for (let y = cy + 1; y >= MIN_DASHBOARD_YEAR; y--) out.push(y)
-  return out
 }
 
 function aggregateByDay(
@@ -136,29 +134,28 @@ function categoryRowSelectValue(row: CategoryMonthlyRow): string {
 
 export default function DashboardPage() {
   const { t } = useTranslation()
-  const yearOptions = useMemo(() => yearSelectOptions(), [])
+  const fiscalOptions = useMemo(() => fiscalYearSelectOptions(), [])
 
   const { month: storeMonth, setMonth: setStoreMonth } = useMonthStore()
   const selectedMonth = storeMonth
 
-  const [periodSelect, setPeriodSelect] = useState<string>(() => {
-    const y = parseInt(storeMonth.slice(0, 4), 10)
-    return Number.isFinite(y) ? String(y) : String(new Date().getFullYear())
-  })
+  const [periodSelect, setPeriodSelect] = useState<string>(() =>
+    fiscalPeriodSelectValue(DEFAULT_FISCAL_START_YEAR),
+  )
 
-  const isTrailing12 = periodSelect === PERIOD_TRAILING12
-  const selectedCalendarYear = isTrailing12 ? null : parseInt(periodSelect, 10)
-  const calendarYearValid =
-    selectedCalendarYear != null && Number.isFinite(selectedCalendarYear)
+  const selectedFiscalStartYear =
+    parseFiscalPeriodSelectValue(periodSelect) ?? DEFAULT_FISCAL_START_YEAR
+
+  const fiscalRange = useMemo(() => {
+    const months = fiscalYearMonths(selectedFiscalStartYear)
+    return { fromMonth: months[0]!, toMonth: months[months.length - 1]!, months }
+  }, [selectedFiscalStartYear])
+
+  const periodLabel = formatFiscalYearLabel(selectedFiscalStartYear)
 
   const handlePickMonth = useCallback(
     (ym: string) => {
       setStoreMonth(ym)
-      setPeriodSelect((prev) => {
-        if (prev === PERIOD_TRAILING12) return prev
-        const y = parseInt(ym.slice(0, 4), 10)
-        return Number.isFinite(y) ? String(y) : prev
-      })
       requestAnimationFrame(() => {
         document.getElementById("month-detail")?.scrollIntoView({ behavior: "smooth", block: "start" })
       })
@@ -166,12 +163,11 @@ export default function DashboardPage() {
     [setStoreMonth],
   )
 
+  /** Keep month detail inside the selected fiscal year (do not auto-switch period). */
   useEffect(() => {
-    if (periodSelect === PERIOD_TRAILING12) return
-    const y = parseInt(selectedMonth.slice(0, 4), 10)
-    if (!Number.isFinite(y)) return
-    setPeriodSelect((prev) => (prev === PERIOD_TRAILING12 ? prev : String(y)))
-  }, [selectedMonth, periodSelect])
+    if (monthInFiscalYear(selectedMonth, selectedFiscalStartYear)) return
+    setStoreMonth(defaultFiscalDetailMonth(selectedFiscalStartYear))
+  }, [selectedMonth, selectedFiscalStartYear, setStoreMonth])
 
   const { data: summary, isLoading: summaryLoading, error: summaryError } = useQuery({
     queryKey: ["summary", selectedMonth],
@@ -195,55 +191,11 @@ export default function DashboardPage() {
   })
 
   const { data: yearTrends, isLoading: yearTrendsLoading } = useQuery({
-    queryKey: isTrailing12
-      ? (["trends", "trailing", 12] as const)
-      : (["trends", "year", selectedCalendarYear] as const),
-    queryFn: () =>
-      isTrailing12
-        ? getTrailingOverview(12)
-        : getYearOverview(selectedCalendarYear!),
-    enabled: isTrailing12 || calendarYearValid,
+    queryKey: ["trends", "range", fiscalRange.fromMonth, fiscalRange.toMonth] as const,
+    queryFn: () => getRangeOverview(fiscalRange.fromMonth, fiscalRange.toMonth),
   })
 
-  const monthsInYear = useMemo(() => {
-    if (isTrailing12) {
-      return yearTrends?.months?.length ? yearTrends.months : []
-    }
-    const y = selectedCalendarYear
-    if (y == null || !Number.isFinite(y)) return []
-    if (yearTrends?.months?.length) {
-      return yearTrends.months.filter((m) => m.startsWith(`${y}-`))
-    }
-    return Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, "0")}`)
-  }, [isTrailing12, yearTrends?.months, selectedCalendarYear])
-
-  /** Trailing-12: month outside window — exit to that calendar year instead of overwriting storeMonth. */
-  useEffect(() => {
-    if (!isTrailing12 || !yearTrends?.months?.length) return
-    if (yearTrends.months.includes(selectedMonth)) return
-    const y = parseInt(selectedMonth.slice(0, 4), 10)
-    if (!Number.isFinite(y)) return
-    setPeriodSelect(String(y))
-  }, [isTrailing12, yearTrends?.months, selectedMonth])
-
-  /** Calendar year: clamp only when trends match this year (avoids race with topbar cross-year pick). */
-  useEffect(() => {
-    if (isTrailing12 || !yearTrends?.months?.length || selectedCalendarYear == null) return
-    const monthYear = parseInt(selectedMonth.slice(0, 4), 10)
-    if (!Number.isFinite(monthYear) || monthYear !== selectedCalendarYear) return
-    const prefix = `${selectedCalendarYear}-`
-    if (!yearTrends.months.some((m) => m.startsWith(prefix))) return
-    const first = yearTrends.months[0]
-    if (first && !first.startsWith(`${selectedCalendarYear}-`)) return
-    if (yearTrends.months.includes(selectedMonth)) return
-    setStoreMonth(yearTrends.months[yearTrends.months.length - 1]!)
-  }, [
-    isTrailing12,
-    yearTrends?.months,
-    selectedMonth,
-    setStoreMonth,
-    selectedCalendarYear,
-  ])
+  const monthsInYear = fiscalRange.months
 
   const categoryMonthlyRows = yearTrends?.category_monthly
 
@@ -395,29 +347,23 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted-foreground">{t("dashboard.year")}:</span>
+          <span className="text-sm text-muted-foreground">{t("dashboard.period")}:</span>
           <Select
             value={periodSelect}
             onValueChange={(v) => {
-              if (v === PERIOD_TRAILING12) {
-                setPeriodSelect(PERIOD_TRAILING12)
-                return
-              }
-              const y = parseInt(v, 10)
-              if (Number.isFinite(y)) {
-                setPeriodSelect(v)
-                setStoreMonth(`${y}-01`)
-              }
+              const fiscalStart = parseFiscalPeriodSelectValue(v)
+              if (fiscalStart == null) return
+              setPeriodSelect(v)
+              setStoreMonth(defaultFiscalDetailMonth(fiscalStart))
             }}
           >
-            <SelectTrigger className="w-[min(100%,11rem)] min-w-[9.5rem]">
+            <SelectTrigger className="w-[min(100%,13rem)] min-w-[10.5rem]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={PERIOD_TRAILING12}>{t("dashboard.trailing12Months")}</SelectItem>
-              {yearOptions.map((y) => (
-                <SelectItem key={y} value={String(y)}>
-                  {y}
+              {fiscalOptions.map((startYear) => (
+                <SelectItem key={startYear} value={fiscalPeriodSelectValue(startYear)}>
+                  {formatFiscalYearLabel(startYear)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -611,16 +557,11 @@ export default function DashboardPage() {
                   onOpenChange={(open) => {
                     if (!open) setCategoryDrilldownRow(null)
                   }}
-                  merchantsScope={
-                    isTrailing12
-                      ? { trailingCalendarMonths: 12 }
-                      : { year: selectedCalendarYear! }
-                  }
-                  periodLabel={
-                    isTrailing12
-                      ? t("dashboard.trailing12Months")
-                      : String(selectedCalendarYear)
-                  }
+                  merchantsScope={{
+                    fromMonth: fiscalRange.fromMonth,
+                    toMonth: fiscalRange.toMonth,
+                  }}
+                  periodLabel={periodLabel}
                   categoryId={categoryDrilldownRow?.category_id ?? null}
                   categoryName={categoryDrilldownRow?.category_name ?? ""}
                   currency={currency}

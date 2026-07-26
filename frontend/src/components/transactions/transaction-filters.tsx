@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery } from "@tanstack/react-query"
-import type { CategoryRead } from "@/types/api"
+import type { CategoryRead, MerchantSpendGroupRead } from "@/types/api"
 import { listSubcategories } from "@/api/categories"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ export interface FilterValues {
   spend_pattern: string
   amount_min: string
   amount_max: string
+  spend_group_id: string
 }
 
 export const EMPTY_FILTERS: FilterValues = {
@@ -40,6 +41,7 @@ export const EMPTY_FILTERS: FilterValues = {
   spend_pattern: "",
   amount_min: "",
   amount_max: "",
+  spend_group_id: "",
 }
 
 interface Props {
@@ -47,6 +49,7 @@ interface Props {
   onChange: (f: FilterValues) => void
   categories: CategoryRead[] | undefined
   cardLabels: string[]
+  spendGroups?: MerchantSpendGroupRead[]
 }
 
 function useDebounced(value: string, ms: number) {
@@ -58,7 +61,7 @@ function useDebounced(value: string, ms: number) {
   return debounced
 }
 
-export function TransactionFilters({ filters, onChange, categories, cardLabels }: Props) {
+export function TransactionFilters({ filters, onChange, categories, cardLabels, spendGroups }: Props) {
   const { t } = useTranslation()
   const catNum = filters.category_id ? Number(filters.category_id) : 0
   const { data: subcategories } = useQuery({
@@ -175,6 +178,23 @@ export function TransactionFilters({ filters, onChange, categories, cardLabels }
           {cardLabels.map((l) => (
             <SelectItem key={l} value={l}>
               {l.length > 20 ? l.slice(0, 20) + "..." : l}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={filters.spend_group_id || "all"}
+        onValueChange={(v) => update({ spend_group_id: v === "all" ? "" : v })}
+      >
+        <SelectTrigger className="w-40">
+          <SelectValue placeholder={t("transactionsTable.filterSpendGroupPlaceholder")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{t("transactionsTable.allSpendGroups")}</SelectItem>
+          {(spendGroups ?? []).map((g) => (
+            <SelectItem key={g.id} value={String(g.id)}>
+              {g.display_name.length > 22 ? `${g.display_name.slice(0, 22)}…` : g.display_name}
             </SelectItem>
           ))}
         </SelectContent>

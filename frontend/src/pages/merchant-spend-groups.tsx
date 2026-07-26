@@ -34,7 +34,8 @@ import {
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import { getApiErrorToastDescription } from "@/lib/api-client"
 import { toast } from "sonner"
-import { Loader2, RefreshCw, Trash2 } from "lucide-react"
+import { Loader2, RefreshCw, Trash2, ExternalLink } from "lucide-react"
+import { Link } from "react-router-dom"
 
 const TRAILING = "__trail12__"
 
@@ -265,8 +266,17 @@ export default function MerchantSpendGroupsPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
             <CardTitle className="text-base">{t("merchantSpendGroups.membersTitle")}</CardTitle>
+            {selectedId ? (
+              <Link
+                to={`/transactions?spend_group=${selectedId}`}
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                {t("merchantSpendGroups.viewTransactions")}
+              </Link>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-3">
             {!selectedId ? (

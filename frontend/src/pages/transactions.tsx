@@ -1,14 +1,15 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, X } from "lucide-react"
 import type { TransactionRead } from "@/types/api"
 import { useSearchParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMonthStore } from "@/stores/use-month-store"
 import { useTransactions } from "@/hooks/use-transactions"
 import { useMerchantGroups } from "@/hooks/use-merchant-groups"
 import { useCategories } from "@/hooks/use-categories"
 import { useAnomalies } from "@/hooks/use-anomalies"
+import { listMerchantSpendGroups } from "@/api/merchantSpendGroups"
 import { TransactionFilters, EMPTY_FILTERS, type FilterValues } from "@/components/transactions/transaction-filters"
 import { SubcategoryManageDialog } from "@/components/transactions/subcategory-manage-dialog"
 import { DataTable } from "@/components/transactions/data-table"
@@ -38,22 +39,30 @@ export default function TransactionsPage() {
     ...EMPTY_FILTERS,
     q: searchParams.get("q") ?? "",
     missing_card_label: searchParams.get("missing_card") === "1" ? "true" : "",
+    spend_group_id: searchParams.get("spend_group") ?? "",
   }))
   const [pagePending, setPagePending] = useState(0)
   const [pageApproved, setPageApproved] = useState(0)
 
   useEffect(() => {
-    const fromUrl = searchParams.get("missing_card") === "1"
-    if (fromUrl) setViewMode("month")
+    const missingCard = searchParams.get("missing_card") === "1"
+    const spendGroup = searchParams.get("spend_group") ?? ""
+    if (missingCard || spendGroup) setViewMode("month")
     setFilters((prev) => {
-      if (fromUrl) {
-        if (prev.missing_card_label === "true" && prev.card_label === "") return prev
-        return { ...prev, missing_card_label: "true", card_label: "" }
+      let next = prev
+      if (missingCard) {
+        if (prev.missing_card_label !== "true" || prev.card_label !== "") {
+          next = { ...next, missing_card_label: "true", card_label: "" }
+        }
+      } else if (prev.missing_card_label === "true") {
+        next = { ...next, missing_card_label: "" }
       }
-      if (prev.missing_card_label === "true") {
-        return { ...prev, missing_card_label: "" }
+      if (spendGroup !== prev.spend_group_id) {
+        next = { ...next, spend_group_id: spendGroup }
+      } else if (!spendGroup && prev.spend_group_id) {
+        next = { ...next, spend_group_id: "" }
       }
-      return prev
+      return next === prev ? prev : next
     })
   }, [searchParams])
 
@@ -68,6 +77,7 @@ export default function TransactionsPage() {
       const sp = new URLSearchParams()
       if (f.q) sp.set("q", f.q)
       if (f.missing_card_label === "true") sp.set("missing_card", "1")
+      if (f.spend_group_id) sp.set("spend_group", f.spend_group_id)
       setSearchParams(sp, { replace: true })
     },
     [setSearchParams],
@@ -89,8 +99,24 @@ export default function TransactionsPage() {
     if (filters.amount_min) p.amount_min = Number(filters.amount_min)
     if (filters.amount_max) p.amount_max = Number(filters.amount_max)
     if (filters.spend_pattern) p.spend_pattern = filters.spend_pattern
+    if (filters.spend_group_id) p.spend_group_id = Number(filters.spend_group_id)
     return p
   }, [month, filters])
+
+  const { data: spendGroups } = useQuery({
+    queryKey: ["merchant-spend-groups"],
+    queryFn: listMerchantSpendGroups,
+  })
+
+  const activeSpendGroup = useMemo(() => {
+    if (!filters.spend_group_id || !spendGroups) return null
+    const id = Number(filters.spend_group_id)
+    return spendGroups.find((g) => g.id === id) ?? null
+  }, [filters.spend_group_id, spendGroups])
+
+  const clearSpendGroupFilter = useCallback(() => {
+    handleFiltersChange({ ...filters, spend_group_id: "" })
+  }, [filters, handleFiltersChange])
 
   const approveMut = useMutation({
     mutationFn: (row: MerchantGroupRow) =>
@@ -233,9 +259,30 @@ export default function TransactionsPage() {
               onChange={handleFiltersChange}
               categories={categories.data}
               cardLabels={cardLabels}
+              spendGroups={spendGroups}
             />
             <SubcategoryManageDialog />
           </div>
+
+          {activeSpendGroup ? (
+            <p className="flex max-w-3xl flex-wrap items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              <span>
+                {t("transactionsTable.spendGroupFilterBanner", {
+                  name: activeSpendGroup.display_name,
+                })}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={clearSpendGroupFilter}
+              >
+                <X className="h-3 w-3" />
+                {t("transactionsTable.spendGroupFilterClear")}
+              </Button>
+            </p>
+          ) : null}
 
           <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
             {t("transactionsTable.legend")}

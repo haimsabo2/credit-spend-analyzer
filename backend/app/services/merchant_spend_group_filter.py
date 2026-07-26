@@ -18,6 +18,16 @@ def transaction_not_in_merchant_spend_group_clause():
     )
 
 
+def transaction_in_spend_group_clause(group_id: int):
+    """Correlated EXISTS: transaction description matches a member of this spend group."""
+    return exists(
+        select(MerchantSpendGroupMember.id).where(
+            MerchantSpendGroupMember.group_id == group_id,
+            MerchantSpendGroupMember.pattern_key == func.lower(func.trim(Transaction.description)),
+        )
+    )
+
+
 def spend_group_display_names_by_pattern_keys(
     session: Session, pattern_keys: set[str]
 ) -> dict[str, str]:

@@ -163,6 +163,36 @@ def test_trends_year_all_zeros(client: TestClient):
     assert data["category_monthly"] == []
 
 
+def test_trends_from_to_month_range(seeded_client: TestClient):
+    """Inclusive month range (e.g. fiscal Jul–Jun) returns all slots with zeros for gaps."""
+    r = seeded_client.get(
+        "/api/insights/trends",
+        params={"from_month": "2025-07", "to_month": "2026-06"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["months"]) == 12
+    assert data["months"][0] == "2025-07"
+    assert data["months"][-1] == "2026-06"
+    assert len(data["total_spend_series"]) == 12
+    assert "2026-04" in data["months"]
+    idx = data["months"].index("2026-04")
+    assert data["total_spend_series"][idx] > 0
+
+
+def test_trends_from_to_requires_both(client: TestClient):
+    r = client.get("/api/insights/trends", params={"from_month": "2025-07"})
+    assert r.status_code == 422
+
+
+def test_trends_from_to_rejects_inverted_range(client: TestClient):
+    r = client.get(
+        "/api/insights/trends",
+        params={"from_month": "2026-06", "to_month": "2025-07"},
+    )
+    assert r.status_code == 422
+
+
 def test_trends_trailing_calendar_months_shape_any_db(client: TestClient):
     """With no uploads, months is empty; with data, always 12 trailing slots."""
     r = client.get("/api/insights/trends", params={"trailing_calendar_months": 12})

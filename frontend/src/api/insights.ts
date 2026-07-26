@@ -11,8 +11,20 @@ export async function getSummary(month: string): Promise<SummaryResponse> {
 }
 
 export async function getTrends(
-  opts?: { months?: number; year?: number; trailingCalendarMonths?: number },
+  opts?: {
+    months?: number
+    year?: number
+    trailingCalendarMonths?: number
+    fromMonth?: string
+    toMonth?: string
+  },
 ): Promise<TrendsResponse> {
+  if (opts?.fromMonth != null && opts?.toMonth != null) {
+    return api.get<TrendsResponse>("/insights/trends", {
+      from_month: opts.fromMonth,
+      to_month: opts.toMonth,
+    })
+  }
   if (opts?.trailingCalendarMonths != null) {
     return api.get<TrendsResponse>("/insights/trends", {
       trailing_calendar_months: opts.trailingCalendarMonths,
@@ -23,6 +35,14 @@ export async function getTrends(
   }
   const months = opts?.months ?? 12
   return api.get<TrendsResponse>("/insights/trends", { months })
+}
+
+/** Inclusive YYYY-MM range (e.g. fiscal Jul–Jun). */
+export async function getRangeOverview(
+  fromMonth: string,
+  toMonth: string,
+): Promise<TrendsResponse> {
+  return getTrends({ fromMonth, toMonth })
 }
 
 /** Calendar year: 12 months YYYY-01 … YYYY-12 with zeros for empty months. */
@@ -38,6 +58,7 @@ export async function getTrailingOverview(trailingCalendarMonths = 12): Promise<
 export type CategoryMerchantsScope =
   | { year: number }
   | { trailingCalendarMonths: number }
+  | { fromMonth: string; toMonth: string }
 
 /** Per-merchant monthly spend for one category over the given scope (omit categoryId for uncategorized). */
 export async function getCategoryYearMerchants(
@@ -50,8 +71,11 @@ export async function getCategoryYearMerchants(
   }
   if ("year" in scope) {
     params.year = scope.year
-  } else {
+  } else if ("trailingCalendarMonths" in scope) {
     params.trailing_calendar_months = scope.trailingCalendarMonths
+  } else {
+    params.from_month = scope.fromMonth
+    params.to_month = scope.toMonth
   }
   return api.get<CategoryYearMerchantsResponse>("/insights/category-year-merchants", params)
 }
@@ -67,8 +91,11 @@ export async function getCategoryYearSubcategories(
   }
   if ("year" in scope) {
     params.year = scope.year
-  } else {
+  } else if ("trailingCalendarMonths" in scope) {
     params.trailing_calendar_months = scope.trailingCalendarMonths
+  } else {
+    params.from_month = scope.fromMonth
+    params.to_month = scope.toMonth
   }
   return api.get<CategoryYearMerchantsResponse>("/insights/category-year-subcategories", params)
 }
