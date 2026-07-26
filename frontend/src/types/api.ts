@@ -137,6 +137,22 @@ export interface MerchantSpendGroupRead {
   id: number
   display_name: string
   created_at: string
+  category_id: number | null
+  category_name: string | null
+  link_mode: "rollup" | "as_subcategory" | null
+  subcategory_id: number | null
+  subcategory_name: string | null
+}
+
+export interface MerchantSpendGroupLinkCategoryResponse {
+  category_id: number
+  category_name: string
+  link_mode: "rollup" | "as_subcategory"
+  subcategory_id: number | null
+  subcategory_name: string | null
+  members_processed: number
+  rules_created: number
+  transactions_updated: number
 }
 
 export interface MerchantSpendGroupMemberRead {

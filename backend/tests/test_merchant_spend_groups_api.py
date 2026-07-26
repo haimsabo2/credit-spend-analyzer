@@ -215,3 +215,164 @@ def test_add_member_wildcard_only_rejected(seeded_client: TestClient):
         json={"pattern_key": "***"},
     )
     assert r.status_code == 422
+
+
+def _free_pattern_key(client: TestClient) -> str:
+    """Return a transaction pattern_key not already assigned to any spend group."""
+    txns = client.get("/api/transactions", params={"limit": 200}).json()
+    taken: set[str] = set()
+    for grp in client.get("/api/merchant-spend-groups").json():
+        for m in client.get(f"/api/merchant-spend-groups/{grp['id']}/members").json():
+            taken.add(m["pattern_key"])
+    for tx in txns:
+        pk = (tx.get("description") or "").strip().lower()
+        if pk and pk not in taken:
+            return pk
+    pytest.skip("No free pattern_key for link tests")
+
+
+def test_link_group_rollup_categorizes_members(seeded_client: TestClient):
+    cats = seeded_client.get("/api/categories").json()
+    cat = next(c for c in cats if c["name"] == "סופר ומכולת")
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "סופר"},
+    ).json()
+    pk = _free_pattern_key(seeded_client)
+    tx = next(
+        t
+        for t in seeded_client.get("/api/transactions", params={"limit": 200}).json()
+        if (t.get("description") or "").strip().lower() == pk
+    )
+    add = seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/members",
+        json={"pattern_key": pk},
+    )
+    assert add.status_code == 201
+    r = seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/link-category",
+        json={"category_id": cat["id"], "link_mode": "rollup"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["category_id"] == cat["id"]
+    assert body["link_mode"] == "rollup"
+    assert body["subcategory_id"] is None
+    assert body["members_processed"] == 1
+    assert body["transactions_updated"] >= 1
+
+    tx2 = next(
+        t
+        for t in seeded_client.get("/api/transactions", params={"limit": 200}).json()
+        if t["id"] == tx["id"]
+    )
+    assert tx2["category_id"] == cat["id"]
+    assert tx2["subcategory_id"] is None
+
+    listed = seeded_client.get("/api/merchant-spend-groups").json()
+    row = next(x for x in listed if x["id"] == g["id"])
+    assert row["category_id"] == cat["id"]
+    assert row["category_name"] == cat["name"]
+    assert row["link_mode"] == "rollup"
+
+
+def test_link_group_as_subcategory_creates_subcategory(seeded_client: TestClient):
+    cats = seeded_client.get("/api/categories").json()
+    cat = next(c for c in cats if c["name"] == "נסיעות וחו\"ל")
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "אילת 2026"},
+    ).json()
+    pk = _free_pattern_key(seeded_client)
+    tx = next(
+        t
+        for t in seeded_client.get("/api/transactions", params={"limit": 200}).json()
+        if (t.get("description") or "").strip().lower() == pk
+    )
+    add = seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/members",
+        json={"pattern_key": pk},
+    )
+    assert add.status_code == 201
+    r = seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/link-category",
+        json={"category_id": cat["id"], "link_mode": "as_subcategory"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["link_mode"] == "as_subcategory"
+    assert body["subcategory_id"] is not None
+    assert body["subcategory_name"] == "אילת 2026"
+
+    tx2 = next(
+        t
+        for t in seeded_client.get("/api/transactions", params={"limit": 200}).json()
+        if t["id"] == tx["id"]
+    )
+    assert tx2["category_id"] == cat["id"]
+    assert tx2["subcategory_id"] == body["subcategory_id"]
+
+    subs = seeded_client.get(f"/api/categories/{cat['id']}/subcategories").json()
+    assert any(s["id"] == body["subcategory_id"] for s in subs)
+
+
+def test_new_member_inherits_linked_group(seeded_client: TestClient):
+    cats = seeded_client.get("/api/categories").json()
+    cat = next(c for c in cats if c["name"] == "סופר ומכולת")
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "Rollup linked"},
+    ).json()
+    taken: set[str] = set()
+    for grp in seeded_client.get("/api/merchant-spend-groups").json():
+        for m in seeded_client.get(f"/api/merchant-spend-groups/{grp['id']}/members").json():
+            taken.add(m["pattern_key"])
+    txns = seeded_client.get("/api/transactions", params={"limit": 200}).json()
+    free = [
+        t
+        for t in txns
+        if (t.get("description") or "").strip().lower()
+        and (t.get("description") or "").strip().lower() not in taken
+    ]
+    if len(free) < 2:
+        pytest.skip("Need two free pattern keys")
+    pk1 = (free[0]["description"] or "").strip().lower()
+    pk2 = (free[1]["description"] or "").strip().lower()
+    assert pk1 != pk2
+    seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/members",
+        json={"pattern_key": pk1},
+    )
+    seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/link-category",
+        json={"category_id": cat["id"], "link_mode": "rollup"},
+    )
+    add2 = seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/members",
+        json={"pattern_key": pk2},
+    )
+    assert add2.status_code == 201
+    tx2 = next(
+        t
+        for t in seeded_client.get("/api/transactions", params={"limit": 200}).json()
+        if t["id"] == free[1]["id"]
+    )
+    assert tx2["category_id"] == cat["id"]
+
+
+def test_unlink_group_clears_link_metadata(seeded_client: TestClient):
+    cats = seeded_client.get("/api/categories").json()
+    cat = cats[0]
+    g = seeded_client.post(
+        "/api/merchant-spend-groups",
+        json={"display_name": "Unlink test"},
+    ).json()
+    seeded_client.post(
+        f"/api/merchant-spend-groups/{g['id']}/link-category",
+        json={"category_id": cat["id"], "link_mode": "rollup"},
+    )
+    r = seeded_client.post(f"/api/merchant-spend-groups/{g['id']}/unlink-category")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["category_id"] is None
+    assert body["link_mode"] is None

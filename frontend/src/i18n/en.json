@@ -341,7 +341,22 @@
     "drilldownPickGroup": "Choose a group",
     "syncApprovals": "Sync approvals",
     "syncSuccess": "Synced {{processed}} spend-group line(s); {{newCount}} new approval(s) created.",
-    "syncFailed": "Could not sync approvals"
+    "syncFailed": "Could not sync approvals",
+    "linkCategoryTitle": "Link to category",
+    "linkCategoryHint": "Connect this group to a parent category. All member lines are categorized, classification rules are created for future purchases, and new members inherit the same mapping.",
+    "pickCategory": "Choose category",
+    "linkModeRollup": "Merge into category (e.g. Super → Groceries)",
+    "linkModeSubcategory": "As subcategory (e.g. trip → Travel abroad)",
+    "linkModeRollupHint": "Spend rolls up under the category. The group name appears in category drilldowns.",
+    "linkModeSubcategoryHint": "Creates subcategory «{{name}}» under the category — good for trips and projects.",
+    "applyLink": "Link and apply to all members",
+    "linkSuccess": "Updated {{count}} transaction(s); created {{rules}} rule(s).",
+    "linkFailed": "Could not link to category",
+    "linkedTo": "Linked to category: {{category}}",
+    "linkedSubcategory": "Subcategory: {{name}}",
+    "unlinkCategory": "Unlink (keeps existing categories and rules)",
+    "unlinkSuccess": "Category link removed",
+    "unlinkFailed": "Could not unlink category"
   },
   "categoryMerchants": {
     "title": "Categories & merchants",

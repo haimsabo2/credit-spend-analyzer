@@ -8,10 +8,17 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from ..dependencies import SessionDep
-from ..models import MerchantKeyUserApproval, MerchantSpendGroup, MerchantSpendGroupMember, Transaction
+from ..models import Category, MerchantKeyUserApproval, MerchantSpendGroup, MerchantSpendGroupMember, Subcategory, Transaction
 from ..services.merchant_subcategory import ensure_merchant_key_user_approval
+from ..services.spend_group_category_link import (
+    apply_linked_group_to_member,
+    link_spend_group_to_category,
+    unlink_spend_group_from_category,
+)
 from ..schemas import (
     MerchantSpendGroupCreate,
+    MerchantSpendGroupLinkCategory,
+    MerchantSpendGroupLinkCategoryResponse,
     MerchantSpendGroupMemberAddResult,
     MerchantSpendGroupMemberCreate,
     MerchantSpendGroupMemberRead,
@@ -21,6 +28,27 @@ from ..schemas import (
 )
 
 router = APIRouter()
+
+
+def _to_group_read(session: Session, group: MerchantSpendGroup) -> MerchantSpendGroupRead:
+    category_name: str | None = None
+    subcategory_name: str | None = None
+    if group.category_id is not None:
+        cat = session.get(Category, group.category_id)
+        category_name = cat.name if cat else None
+    if group.subcategory_id is not None:
+        sub = session.get(Subcategory, group.subcategory_id)
+        subcategory_name = sub.name if sub else None
+    return MerchantSpendGroupRead(
+        id=group.id,  # type: ignore[arg-type]
+        display_name=group.display_name,
+        created_at=group.created_at,
+        category_id=group.category_id,
+        category_name=category_name,
+        link_mode=group.link_mode,
+        subcategory_id=group.subcategory_id,
+        subcategory_name=subcategory_name,
+    )
 
 
 def _normalize_pattern_key(raw: str) -> str:
@@ -84,7 +112,8 @@ def _keys_matching_fnmatch(all_keys: list[str], fn_pattern: str) -> list[str]:
 @router.get("", response_model=List[MerchantSpendGroupRead])
 def list_merchant_spend_groups(session: SessionDep):
     stmt = select(MerchantSpendGroup).order_by(MerchantSpendGroup.display_name)
-    return list(session.exec(stmt).all())
+    groups = list(session.exec(stmt).all())
+    return [_to_group_read(session, g) for g in groups]
 
 
 @router.post("", response_model=MerchantSpendGroupRead, status_code=201)
@@ -96,7 +125,7 @@ def create_merchant_spend_group(body: MerchantSpendGroupCreate, session: Session
     session.add(g)
     session.commit()
     session.refresh(g)
-    return g
+    return _to_group_read(session, g)
 
 
 @router.post(
@@ -138,7 +167,7 @@ def update_merchant_spend_group(
     session.add(g)
     session.commit()
     session.refresh(g)
-    return g
+    return _to_group_read(session, g)
 
 
 @router.delete("/{group_id}", status_code=204)
@@ -149,6 +178,58 @@ def delete_merchant_spend_group(group_id: int, session: SessionDep):
     session.delete(g)
     session.commit()
     return None
+
+
+@router.post(
+    "/{group_id}/link-category",
+    response_model=MerchantSpendGroupLinkCategoryResponse,
+)
+def link_merchant_spend_group_category(
+    group_id: int,
+    body: MerchantSpendGroupLinkCategory,
+    session: SessionDep,
+):
+    g = session.get(MerchantSpendGroup, group_id)
+    if not g:
+        raise HTTPException(404, detail="Group not found")
+    if not session.get(Category, body.category_id):
+        raise HTTPException(404, detail="Category not found")
+    try:
+        result = link_spend_group_to_category(
+            session, g, body.category_id, body.link_mode  # type: ignore[arg-type]
+        )
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    session.commit()
+    session.refresh(g)
+    cat = session.get(Category, result.category_id)
+    sub_name: str | None = None
+    if result.subcategory_id is not None:
+        sub = session.get(Subcategory, result.subcategory_id)
+        sub_name = sub.name if sub else None
+    return MerchantSpendGroupLinkCategoryResponse(
+        category_id=result.category_id,
+        category_name=cat.name if cat else "",
+        link_mode=result.link_mode,
+        subcategory_id=result.subcategory_id,
+        subcategory_name=sub_name,
+        members_processed=result.members_processed,
+        rules_created=result.rules_created,
+        transactions_updated=result.transactions_updated,
+    )
+
+
+@router.post("/{group_id}/unlink-category", response_model=MerchantSpendGroupRead)
+def unlink_merchant_spend_group_category(group_id: int, session: SessionDep):
+    g = session.get(MerchantSpendGroup, group_id)
+    if not g:
+        raise HTTPException(404, detail="Group not found")
+    if g.category_id is None:
+        raise HTTPException(400, detail="Group is not linked to a category")
+    unlink_spend_group_from_category(session, g)
+    session.commit()
+    session.refresh(g)
+    return _to_group_read(session, g)
 
 
 @router.get("/{group_id}/members", response_model=List[MerchantSpendGroupMemberRead])
@@ -173,7 +254,8 @@ def add_group_member(
     body: MerchantSpendGroupMemberCreate,
     session: SessionDep,
 ):
-    if not session.get(MerchantSpendGroup, group_id):
+    g = session.get(MerchantSpendGroup, group_id)
+    if not g:
         raise HTTPException(404, detail="Group not found")
     raw = (body.pattern_key or "").strip()
     if not raw:
@@ -200,6 +282,7 @@ def add_group_member(
         session.add(m)
         session.flush()
         ensure_merchant_key_user_approval(session, pk)
+        apply_linked_group_to_member(session, g, pk)
         session.commit()
         session.refresh(m)
         return MerchantSpendGroupMemberAddResult(
@@ -239,6 +322,7 @@ def add_group_member(
     session.flush()
     for m in added_rows:
         ensure_merchant_key_user_approval(session, m.pattern_key)
+        apply_linked_group_to_member(session, g, m.pattern_key)
     session.commit()
     for m in added_rows:
         session.refresh(m)

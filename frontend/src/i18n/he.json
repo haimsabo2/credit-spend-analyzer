@@ -341,7 +341,22 @@
     "drilldownPickGroup": "בחרו קבוצה",
     "syncApprovals": "סנכרן אישורים",
     "syncSuccess": "סונכרנו {{processed}} שורות מקבוצות הוצאה; נוצרו {{newCount}} אישורים חדשים.",
-    "syncFailed": "לא ניתן לסנכרן אישורים"
+    "syncFailed": "לא ניתן לסנכרן אישורים",
+    "linkCategoryTitle": "קישור לקטגוריה",
+    "linkCategoryHint": "קשרו את הקבוצה לקטגוריית אב. כל שורות החברים יסווגו, ייווצרו כללי סיווג לעתיד, ועסקאות חדשות שיתווספו לקבוצה יירשו את אותו הסיווג.",
+    "pickCategory": "בחרו קטגוריה",
+    "linkModeRollup": "מיזוג לקטגוריה (למשל סופר → סופר ומכולת)",
+    "linkModeSubcategory": "כתת־קטגוריה (למשל טיול → נסיעות וחו\"ל)",
+    "linkModeRollupHint": "כל ההוצאות ייספרו תחת הקטגוריה. שם הקבוצה יופיע בפירוט קטגוריה בדשבורד.",
+    "linkModeSubcategoryHint": "ייווצר תת־קטגוריה בשם «{{name}}» תחת הקטגוריה — מתאים לטיולים ופרויקטים.",
+    "applyLink": "קשר והחל על כל החברים",
+    "linkSuccess": "עודכנו {{count}} עסקאות; נוצרו {{rules}} כללים.",
+    "linkFailed": "לא ניתן לקשר לקטגוריה",
+    "linkedTo": "מקושר לקטגוריה: {{category}}",
+    "linkedSubcategory": "תת־קטגוריה: {{name}}",
+    "unlinkCategory": "נתק קישור (שומר סיווג וכללים קיימים)",
+    "unlinkSuccess": "הקישור לקטגוריה הוסר",
+    "unlinkFailed": "לא ניתן לנתק קישור"
   },
   "categoryMerchants": {
     "title": "קטגוריות ובתי עסק",

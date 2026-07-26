@@ -179,6 +179,22 @@ class MerchantSpendGroup(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     display_name: str = Field(index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    category_id: Optional[int] = Field(
+        default=None,
+        foreign_key="category.id",
+        index=True,
+        description="Parent category when group is linked for categorization",
+    )
+    link_mode: Optional[str] = Field(
+        default=None,
+        description="rollup: merge into category only; as_subcategory: group name becomes subcategory",
+    )
+    subcategory_id: Optional[int] = Field(
+        default=None,
+        foreign_key="subcategory.id",
+        index=True,
+        description="Subcategory row when link_mode is as_subcategory",
+    )
 
     members: List["MerchantSpendGroupMember"] = Relationship(
         back_populates="group",

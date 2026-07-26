@@ -5,6 +5,7 @@ import type {
   MerchantSpendGroupMemberRead,
   MerchantSpendGroupRead,
   MerchantSpendGroupSyncApprovalsResponse,
+  MerchantSpendGroupLinkCategoryResponse,
 } from "@/types/api"
 
 export async function listMerchantSpendGroups(): Promise<MerchantSpendGroupRead[]> {
@@ -43,6 +44,23 @@ export async function addGroupMember(
 
 export async function removeGroupMember(groupId: number, memberId: number): Promise<void> {
   await api.del(`/merchant-spend-groups/${groupId}/members/${memberId}`)
+}
+
+export async function linkSpendGroupCategory(
+  groupId: number,
+  categoryId: number,
+  linkMode: "rollup" | "as_subcategory",
+): Promise<MerchantSpendGroupLinkCategoryResponse> {
+  return api.post<MerchantSpendGroupLinkCategoryResponse>(
+    `/merchant-spend-groups/${groupId}/link-category`,
+    { category_id: categoryId, link_mode: linkMode },
+  )
+}
+
+export async function unlinkSpendGroupCategory(
+  groupId: number,
+): Promise<MerchantSpendGroupRead> {
+  return api.post<MerchantSpendGroupRead>(`/merchant-spend-groups/${groupId}/unlink-category`)
 }
 
 export type MerchantGroupSeriesScope =

@@ -383,6 +383,11 @@ class MerchantSpendGroupRead(SQLModel):
     id: int
     display_name: str
     created_at: datetime
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
+    link_mode: Optional[str] = None
+    subcategory_id: Optional[int] = None
+    subcategory_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -393,6 +398,33 @@ class MerchantSpendGroupCreate(SQLModel):
 
 class MerchantSpendGroupUpdate(SQLModel):
     display_name: str
+
+
+class MerchantSpendGroupLinkCategory(SQLModel):
+    category_id: int = Field(ge=1)
+    link_mode: str = Field(
+        ...,
+        description="rollup: merge into category; as_subcategory: group name becomes subcategory",
+    )
+
+    @field_validator("link_mode")
+    @classmethod
+    def validate_link_mode(cls, v: str) -> str:
+        mode = (v or "").strip().lower()
+        if mode not in ("rollup", "as_subcategory"):
+            raise ValueError("link_mode must be rollup or as_subcategory")
+        return mode
+
+
+class MerchantSpendGroupLinkCategoryResponse(SQLModel):
+    category_id: int
+    category_name: str
+    link_mode: str
+    subcategory_id: Optional[int] = None
+    subcategory_name: Optional[str] = None
+    members_processed: int
+    rules_created: int
+    transactions_updated: int
 
 
 class MerchantSpendGroupMemberRead(SQLModel):

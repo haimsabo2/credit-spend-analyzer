@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -30,7 +30,10 @@ import {
   removeGroupMember,
   getMerchantGroupSeries,
   syncSpendGroupApprovals,
+  linkSpendGroupCategory,
+  unlinkSpendGroupCategory,
 } from "@/api/merchantSpendGroups"
+import { useCategories } from "@/hooks/use-categories"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import { getApiErrorToastDescription } from "@/lib/api-client"
 import { toast } from "sonner"
@@ -38,6 +41,8 @@ import { Loader2, RefreshCw, Trash2, ExternalLink } from "lucide-react"
 import { Link } from "react-router-dom"
 
 const TRAILING = "__trail12__"
+const LINK_ROLLUP = "rollup"
+const LINK_SUBCATEGORY = "as_subcategory"
 
 export default function MerchantSpendGroupsPage() {
   const { t } = useTranslation()
@@ -46,11 +51,30 @@ export default function MerchantSpendGroupsPage() {
   const [newGroupName, setNewGroupName] = useState("")
   const [patternInput, setPatternInput] = useState("")
   const [chartScope, setChartScope] = useState<string>(() => String(new Date().getFullYear()))
+  const [linkCategoryId, setLinkCategoryId] = useState<string>("")
+  const [linkMode, setLinkMode] = useState<typeof LINK_ROLLUP | typeof LINK_SUBCATEGORY>(LINK_ROLLUP)
+
+  const { data: categories } = useCategories()
 
   const { data: groups, isLoading: groupsLoading } = useQuery({
     queryKey: ["merchant-spend-groups"],
     queryFn: listMerchantSpendGroups,
   })
+
+  const selectedGroup = useMemo(
+    () => groups?.find((g) => g.id === selectedId) ?? null,
+    [groups, selectedId],
+  )
+
+  useEffect(() => {
+    if (selectedGroup?.category_id) {
+      setLinkCategoryId(String(selectedGroup.category_id))
+      setLinkMode(selectedGroup.link_mode === LINK_SUBCATEGORY ? LINK_SUBCATEGORY : LINK_ROLLUP)
+    } else {
+      setLinkCategoryId("")
+      setLinkMode(LINK_ROLLUP)
+    }
+  }, [selectedGroup?.id, selectedGroup?.category_id, selectedGroup?.link_mode])
 
   const { data: members, isLoading: membersLoading } = useQuery({
     queryKey: ["merchant-spend-groups", selectedId, "members"],
@@ -176,6 +200,44 @@ export default function MerchantSpendGroupsPage() {
     },
   })
 
+  const linkCategoryMut = useMutation({
+    mutationFn: () =>
+      linkSpendGroupCategory(
+        selectedId as number,
+        Number(linkCategoryId),
+        linkMode,
+      ),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["merchant-spend-groups"] })
+      qc.invalidateQueries({ queryKey: ["transactions"] })
+      qc.invalidateQueries({ queryKey: ["categories"] })
+      toast.success(
+        t("merchantSpendGroups.linkSuccess", {
+          count: res.transactions_updated,
+          rules: res.rules_created,
+        }),
+      )
+    },
+    onError: (err) => {
+      toast.error(t("merchantSpendGroups.linkFailed"), {
+        description: getApiErrorToastDescription(err),
+      })
+    },
+  })
+
+  const unlinkCategoryMut = useMutation({
+    mutationFn: () => unlinkSpendGroupCategory(selectedId as number),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["merchant-spend-groups"] })
+      toast.success(t("merchantSpendGroups.unlinkSuccess"))
+    },
+    onError: (err) => {
+      toast.error(t("merchantSpendGroups.unlinkFailed"), {
+        description: getApiErrorToastDescription(err),
+      })
+    },
+  })
+
   const cy = new Date().getFullYear()
   const yearOptions = [cy + 1, cy, cy - 1, cy - 2, cy - 3]
 
@@ -240,10 +302,16 @@ export default function MerchantSpendGroupsPage() {
                   <li key={g.id} className="flex items-center justify-between gap-2">
                     <button
                       type="button"
-                      className={`truncate text-start hover:underline ${selectedId === g.id ? "font-semibold text-primary" : ""}`}
+                      className={`min-w-0 flex-1 truncate text-start hover:underline ${selectedId === g.id ? "font-semibold text-primary" : ""}`}
                       onClick={() => setSelectedId(g.id)}
                     >
-                      {g.display_name}
+                      <span className="block truncate">{g.display_name}</span>
+                      {g.category_name ? (
+                        <span className="text-muted-foreground block truncate text-xs font-normal">
+                          {g.category_name}
+                          {g.subcategory_name ? ` · ${g.subcategory_name}` : ""}
+                        </span>
+                      ) : null}
                     </button>
                     <Button
                       type="button"
@@ -329,6 +397,102 @@ export default function MerchantSpendGroupsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {selectedId && selectedGroup ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">{t("merchantSpendGroups.linkCategoryTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              {t("merchantSpendGroups.linkCategoryHint")}
+            </p>
+            {selectedGroup.category_id ? (
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                <p>
+                  {t("merchantSpendGroups.linkedTo", {
+                    category: selectedGroup.category_name ?? "",
+                  })}
+                </p>
+                {selectedGroup.link_mode === LINK_SUBCATEGORY && selectedGroup.subcategory_name ? (
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    {t("merchantSpendGroups.linkedSubcategory", {
+                      name: selectedGroup.subcategory_name,
+                    })}
+                  </p>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  disabled={unlinkCategoryMut.isPending}
+                  onClick={() => unlinkCategoryMut.mutate()}
+                >
+                  {unlinkCategoryMut.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    t("merchantSpendGroups.unlinkCategory")
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-3">
+                  <Select value={linkCategoryId} onValueChange={setLinkCategoryId}>
+                    <SelectTrigger className="w-[min(100%,16rem)]">
+                      <SelectValue placeholder={t("merchantSpendGroups.pickCategory")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(categories ?? []).map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={linkMode}
+                    onValueChange={(v) =>
+                      setLinkMode(v === LINK_SUBCATEGORY ? LINK_SUBCATEGORY : LINK_ROLLUP)
+                    }
+                  >
+                    <SelectTrigger className="w-[min(100%,14rem)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={LINK_ROLLUP}>
+                        {t("merchantSpendGroups.linkModeRollup")}
+                      </SelectItem>
+                      <SelectItem value={LINK_SUBCATEGORY}>
+                        {t("merchantSpendGroups.linkModeSubcategory")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {linkMode === LINK_SUBCATEGORY
+                    ? t("merchantSpendGroups.linkModeSubcategoryHint", {
+                        name: selectedGroup.display_name,
+                      })
+                    : t("merchantSpendGroups.linkModeRollupHint")}
+                </p>
+                <Button
+                  type="button"
+                  disabled={!linkCategoryId || linkCategoryMut.isPending}
+                  onClick={() => linkCategoryMut.mutate()}
+                >
+                  {linkCategoryMut.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    t("merchantSpendGroups.applyLink")
+                  )}
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {selectedId ? (
         <Card>

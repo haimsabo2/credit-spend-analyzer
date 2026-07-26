@@ -319,6 +319,36 @@ def _migrate_restaurants_category_to_leisure_subcategory() -> None:
         session.commit()
 
 
+def _migrate_merchant_spend_group_category_link() -> None:
+    """Add category link columns to merchant_spend_group."""
+    from .models import MerchantSpendGroup
+
+    try:
+        inspector = sa_inspect(engine)
+    except Exception:
+        return
+    tname = MerchantSpendGroup.__tablename__
+    if not inspector.has_table(tname):
+        return
+    cols = {c["name"] for c in inspector.get_columns(tname)}
+    stmts: list[str] = []
+    if "category_id" not in cols:
+        stmts.append(
+            f'ALTER TABLE "{tname}" ADD COLUMN category_id INTEGER REFERENCES category(id)'
+        )
+    if "link_mode" not in cols:
+        stmts.append(f'ALTER TABLE "{tname}" ADD COLUMN link_mode VARCHAR(32)')
+    if "subcategory_id" not in cols:
+        stmts.append(
+            f'ALTER TABLE "{tname}" ADD COLUMN subcategory_id INTEGER REFERENCES subcategory(id)'
+        )
+    if not stmts:
+        return
+    with engine.begin() as conn:
+        for sql in stmts:
+            conn.execute(text(sql))
+
+
 def init_db() -> None:
     """Create database tables for all SQLModel models."""
     from . import models  # noqa: F401
@@ -334,6 +364,7 @@ def init_db() -> None:
     _migrate_transaction_spend_pattern_columns()
     _migrate_transaction_subcategory_column()
     _migrate_merchant_key_user_approval_subcategory()
+    _migrate_merchant_spend_group_category_link()
     with Session(engine) as session:
         ensure_seed_categories(session)
         ensure_default_subcategories(session)
