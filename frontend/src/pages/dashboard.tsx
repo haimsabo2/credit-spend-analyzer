@@ -24,6 +24,7 @@ import { DataQualityCard } from "@/components/dashboard/data-quality-card"
 import { CardSpendSection } from "@/components/dashboard/card-spend-section"
 import { CategoryYearCarousel } from "@/components/dashboard/category-year-carousel"
 import { CategoryYearDrilldownDialog } from "@/components/dashboard/category-year-drilldown-dialog"
+import { CategoryMonthTransactionsDialog } from "@/components/dashboard/category-month-transactions-dialog"
 import { MonthPieSubcategoryDrilldown } from "@/components/dashboard/month-pie-subcategory-drilldown"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ChartCard } from "@/components/dashboard/chart-card"
@@ -132,6 +133,15 @@ function categoryRowSelectValue(row: CategoryMonthlyRow): string {
   return row.category_id == null ? "__uncat__" : String(row.category_id)
 }
 
+function isUncategorizedCategoryRow(row: CategoryMonthlyRow): boolean {
+  return row.category_id == null && row.category_name === "Uncategorized"
+}
+
+function canOpenCategoryMonthCell(row: CategoryMonthlyRow, amount: number): boolean {
+  if (amount <= 0) return false
+  return row.category_id != null || isUncategorizedCategoryRow(row)
+}
+
 export default function DashboardPage() {
   const { t } = useTranslation()
   const fiscalOptions = useMemo(() => fiscalYearSelectOptions(), [])
@@ -200,6 +210,11 @@ export default function DashboardPage() {
   const categoryMonthlyRows = yearTrends?.category_monthly
 
   const [categoryDrilldownRow, setCategoryDrilldownRow] = useState<CategoryMonthlyRow | null>(null)
+  const [categoryMonthCell, setCategoryMonthCell] = useState<{
+    row: CategoryMonthlyRow
+    month: string
+    amount: number
+  } | null>(null)
 
   const [monthPieDrill, setMonthPieDrill] = useState<{
     categoryId: number | null
@@ -208,7 +223,7 @@ export default function DashboardPage() {
 
   const { data: transactions } = useQuery({
     queryKey: ["transactions", selectedMonth],
-    queryFn: () => listTransactions(selectedMonth),
+    queryFn: () => listTransactions({ month: selectedMonth }),
     enabled: !!selectedMonth,
   })
 
@@ -567,6 +582,17 @@ export default function DashboardPage() {
                   currency={currency}
                   currencySymbol={currencySymbol}
                 />
+                <CategoryMonthTransactionsDialog
+                  open={categoryMonthCell != null}
+                  onOpenChange={(open) => {
+                    if (!open) setCategoryMonthCell(null)
+                  }}
+                  month={categoryMonthCell?.month ?? ""}
+                  categoryId={categoryMonthCell?.row.category_id ?? null}
+                  categoryName={categoryMonthCell?.row.category_name ?? ""}
+                  expectedTotal={categoryMonthCell?.amount}
+                  currency={currency}
+                />
                 <div className="overflow-x-auto rounded-md border">
                   <Table>
                     <TableHeader>
@@ -593,14 +619,32 @@ export default function DashboardPage() {
                           <TableCell className="bg-background sticky start-0 z-10 font-medium shadow-[2px_0_4px_-2px_hsl(var(--border))]">
                             {row.category_name}
                           </TableCell>
-                          {row.amounts.map((amt, i) => (
-                            <TableCell
-                              key={yearTrends?.months[i] ?? i}
-                              className="text-end tabular-nums text-sm"
-                            >
-                              {amt > 0 ? formatCurrency(amt, currency) : "—"}
-                            </TableCell>
-                          ))}
+                          {row.amounts.map((amt, i) => {
+                            const ym = yearTrends?.months[i] ?? ""
+                            const clickable = canOpenCategoryMonthCell(row, amt)
+                            return (
+                              <TableCell
+                                key={ym || i}
+                                className={`text-end tabular-nums text-sm ${clickable ? "p-0" : ""}`}
+                              >
+                                {clickable ? (
+                                  <button
+                                    type="button"
+                                    className="hover:bg-muted/80 focus-visible:ring-ring block w-full rounded-sm px-3 py-2 text-end transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                                    onClick={() =>
+                                      setCategoryMonthCell({ row, month: ym, amount: amt })
+                                    }
+                                  >
+                                    {formatCurrency(amt, currency)}
+                                  </button>
+                                ) : (
+                                  <span className="block px-3 py-2">
+                                    {amt > 0 ? formatCurrency(amt, currency) : "—"}
+                                  </span>
+                                )}
+                              </TableCell>
+                            )
+                          })}
                           <TableCell className="text-end tabular-nums font-medium">
                             {formatCurrency(row.year_total, currency)}
                           </TableCell>
@@ -609,6 +653,9 @@ export default function DashboardPage() {
                     </TableBody>
                   </Table>
                 </div>
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  {t("dashboard.categoryYearTableClickHint")}
+                </p>
               </div>
             )}
           </ChartCard>

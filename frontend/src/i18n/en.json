@@ -79,7 +79,12 @@
     "monthPieSubcategoryHint": "Spend without a subcategory appears under the category name.",
     "monthPieSubcategoryClickHint": "Click a category in the chart or list to see its subcategory breakdown for the selected month.",
     "categoryYearTableCategory": "Category",
-    "categoryYearTableTotal": "Year total"
+    "categoryYearTableTotal": "Year total",
+    "categoryYearTableClickHint": "Click an amount to see all transactions for that category in that month.",
+    "categoryMonthTransactionsTitle": "{{category}} — {{month}}",
+    "categoryMonthTransactionsSummary": "{{count}} transactions · total {{total}}",
+    "categoryMonthTransactionsEmpty": "No transactions for this category in this month.",
+    "categoryMonthTransactionsTotalNote": "Year table showed {{tableTotal}} for this cell; the list may differ if categorization changed or spend groups are involved."
   },
   "upload": {
     "title": "Upload report",

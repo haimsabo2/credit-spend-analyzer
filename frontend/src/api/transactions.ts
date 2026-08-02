@@ -3,12 +3,16 @@ import type { Transaction, AutoCategorizeSummary, CategorizeRequest, CategorizeR
 import type {
   MerchantGroupActionBody,
   MerchantGroupListResponse,
+  TransactionQueryParams,
   TransactionRead,
   UncategorizeResponse,
 } from "@/types/api"
 
-export async function listTransactions(month: string, limit = 500, offset = 0): Promise<Transaction[]> {
-  return api.get<Transaction[]>("/transactions", { month, limit, offset })
+export async function listTransactions(
+  params: TransactionQueryParams & { month: string },
+): Promise<Transaction[]> {
+  const { month, limit = 500, offset = 0, ...rest } = params
+  return api.get<Transaction[]>("/transactions", { month, limit, offset, ...rest })
 }
 
 export async function listMerchantGroups(params: {

@@ -79,7 +79,12 @@
     "monthPieSubcategoryHint": "הוצאות בלי תת־קטגוריה מופיעות תחת שם הקטגוריה.",
     "monthPieSubcategoryClickHint": "לחצו על פרוסה ברשימה או בתרשים כדי לראות פירוט תת־קטגוריות לחודש הנבחר.",
     "categoryYearTableCategory": "קטגוריה",
-    "categoryYearTableTotal": "סה״כ שנה"
+    "categoryYearTableTotal": "סה״כ שנה",
+    "categoryYearTableClickHint": "לחצו על סכום כדי לראות את כל העסקאות של אותה קטגוריה באותו חודש.",
+    "categoryMonthTransactionsTitle": "{{category}} — {{month}}",
+    "categoryMonthTransactionsSummary": "{{count}} עסקאות · סה״כ {{total}}",
+    "categoryMonthTransactionsEmpty": "אין עסקאות לקטגוריה זו בחודש זה.",
+    "categoryMonthTransactionsTotalNote": "בטבלה הופיע {{tableTotal}} — הרשימה עלולה להיות שונה אם הסיווג השתנה או שמדובר בקבוצות הוצאה."
   },
   "upload": {
     "title": "העלאת דוח",
