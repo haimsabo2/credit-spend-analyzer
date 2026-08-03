@@ -162,7 +162,6 @@ export default function CategoryMerchantsPage() {
       qc.invalidateQueries({ queryKey: ["merchant-groups"] })
       qc.invalidateQueries({ queryKey: ["transactions"] })
       qc.invalidateQueries({ queryKey: ["summary"] })
-      qc.invalidateQueries({ queryKey: ["needs-review"] })
       toast.success(t("categoryMerchants.moveSuccess"))
       setDialogRow(null)
     },

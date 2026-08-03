@@ -1,4 +1,4 @@
-"""Tests for POST /api/transactions/auto-categorize and GET /api/transactions/needs-review."""
+"""Tests for POST /api/transactions/auto-categorize."""
 
 from __future__ import annotations
 
@@ -8,18 +8,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.schemas import LLMCategorizationResult
-
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
-
-MOCK_LLM_RESULT_NEEDS_REVIEW = LLMCategorizationResult(
-    category_name_he="אחר",
-    confidence=0.4,
-    needs_review=True,
-    reason_he="לא ברור מהי העסקה",
-    merchant_key_guess=None,
-    suggested_new_category=None,
-)
 
 
 @pytest.fixture
@@ -85,53 +74,6 @@ def test_auto_categorize_does_not_invoke_llm_batch(client: TestClient, seeded_mo
         resp = client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
         assert resp.status_code == 200
         mock_batch.assert_not_called()
-
-
-@patch(
-    "backend.app.services.batch_categorize.categorize_transactions_batch",
-)
-def test_needs_review_endpoint(mock_batch, client: TestClient, seeded_month: str):
-    mock_batch.side_effect = lambda txns: {
-        t.id: MOCK_LLM_RESULT_NEEDS_REVIEW for t in txns
-    }
-    client.post("/api/admin/reset-categorization", params={"month": seeded_month})
-    client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
-    client.post(
-        "/api/transactions/llm-categorize-pending",
-        params={"month": seeded_month, "limit": 500},
-    )
-
-    resp = client.get("/api/transactions/needs-review", params={"month": seeded_month})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert isinstance(data, list)
-    for t in data:
-        assert t["needs_review"] is True
-
-
-@patch("backend.app.services.batch_categorize.categorize_transactions_batch")
-def test_llm_categorize_pending_invokes_batch(mock_batch, client: TestClient, seeded_month: str):
-    mock_batch.side_effect = lambda txns: {
-        t.id: MOCK_LLM_RESULT_NEEDS_REVIEW for t in txns
-    }
-    client.post("/api/admin/reset-categorization", params={"month": seeded_month})
-    client.post("/api/transactions/auto-categorize", params={"month": seeded_month})
-    mock_batch.reset_mock()
-    cnt_res = client.get(
-        "/api/transactions/llm-categorize-pending/count",
-        params={"month": seeded_month},
-    )
-    assert cnt_res.status_code == 200
-    pending = cnt_res.json()["pending_count"]
-    resp = client.post(
-        "/api/transactions/llm-categorize-pending",
-        params={"month": seeded_month, "limit": 500},
-    )
-    assert resp.status_code == 200
-    if pending > 0:
-        assert mock_batch.called
-    else:
-        assert resp.json()["processed"] == 0
 
 
 def test_auto_categorize_force_param(client: TestClient, seeded_month: str):

@@ -40,6 +40,7 @@ export default function TransactionsPage() {
     q: searchParams.get("q") ?? "",
     missing_card_label: searchParams.get("missing_card") === "1" ? "true" : "",
     spend_group_id: searchParams.get("spend_group") ?? "",
+    needs_review: searchParams.get("needs_review") === "1" ? "true" : "",
   }))
   const [pagePending, setPagePending] = useState(0)
   const [pageApproved, setPageApproved] = useState(0)
@@ -47,7 +48,8 @@ export default function TransactionsPage() {
   useEffect(() => {
     const missingCard = searchParams.get("missing_card") === "1"
     const spendGroup = searchParams.get("spend_group") ?? ""
-    if (missingCard || spendGroup) setViewMode("month")
+    const needsReview = searchParams.get("needs_review") === "1"
+    if (missingCard || spendGroup || needsReview) setViewMode("month")
     setFilters((prev) => {
       let next = prev
       if (missingCard) {
@@ -61,6 +63,13 @@ export default function TransactionsPage() {
         next = { ...next, spend_group_id: spendGroup }
       } else if (!spendGroup && prev.spend_group_id) {
         next = { ...next, spend_group_id: "" }
+      }
+      if (needsReview) {
+        if (prev.needs_review !== "true") {
+          next = { ...next, needs_review: "true" }
+        }
+      } else if (prev.needs_review === "true") {
+        next = { ...next, needs_review: "" }
       }
       return next === prev ? prev : next
     })
@@ -78,6 +87,7 @@ export default function TransactionsPage() {
       if (f.q) sp.set("q", f.q)
       if (f.missing_card_label === "true") sp.set("missing_card", "1")
       if (f.spend_group_id) sp.set("spend_group", f.spend_group_id)
+      if (f.needs_review === "true") sp.set("needs_review", "1")
       setSearchParams(sp, { replace: true })
     },
     [setSearchParams],

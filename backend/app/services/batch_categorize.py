@@ -243,64 +243,6 @@ def _run_llm_categorization_core(
     return categorized, needs_review_count, failed, failures_sample
 
 
-def llm_categorize_transactions(
-    session: Session,
-    txns: List[Transaction],
-    *,
-    progress_sink: Optional[list[dict[str, Any]]] = None,
-) -> AutoCategorizeSummary:
-    """Run LLM-only categorization for the given rows (rules/dictionary skipped)."""
-    processed = len(txns)
-    if not txns:
-        return AutoCategorizeSummary(
-            processed=0,
-            categorized=0,
-            needs_review=0,
-            failed=0,
-            failures_sample=[],
-        )
-
-    refresh_failed: set[int] = set()
-    for txn in txns:
-        try:
-            session.refresh(txn)
-        except Exception as exc:
-            logger.warning("refresh failed for tx %s before LLM: %s", txn.id, exc)
-            refresh_failed.add(txn.id if txn.id is not None else -1)
-
-    llm_ready = [t for t in txns if t.id not in refresh_failed]
-    failed = len(refresh_failed)
-    failures_sample: list[str] = []
-    for tid in refresh_failed:
-        if tid < 0:
-            continue
-        if len(failures_sample) < _MAX_FAILURE_SAMPLES:
-            failures_sample.append(f"tx {tid}: refresh failed")
-
-    if not llm_ready:
-        refresh_auto_spend_patterns(session)
-        return AutoCategorizeSummary(
-            processed=processed,
-            categorized=0,
-            needs_review=0,
-            failed=failed,
-            failures_sample=failures_sample,
-        )
-
-    _progress_emit(progress_sink, "rules_dictionary", rows=0)
-    cat, nrev, f2, fs2 = _run_llm_categorization_core(session, llm_ready, progress_sink=progress_sink)
-    failures_sample.extend(fs2)
-    failures_sample = failures_sample[:_MAX_FAILURE_SAMPLES]
-    refresh_auto_spend_patterns(session)
-    return AutoCategorizeSummary(
-        processed=processed,
-        categorized=cat,
-        needs_review=nrev,
-        failed=failed + f2,
-        failures_sample=failures_sample,
-    )
-
-
 def batch_categorize_transactions(
     session: Session,
     txns: List[Transaction],

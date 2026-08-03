@@ -88,13 +88,6 @@ export async function patchTransactionCardLabel(
   })
 }
 
-export async function getNeedsReview(month: string, limit = 500): Promise<Transaction[]> {
-  return api.get<Transaction[]>("/transactions/needs-review", { month, limit })
-}
-
-/** Alias for getNeedsReview */
-export const needsReview = getNeedsReview
-
 export async function updateCategory(
   transactionId: number,
   categoryId: number,
@@ -132,22 +125,5 @@ export async function autoCategorize(
     "/transactions/auto-categorize",
     undefined,
     { month: month, force: force },
-  )
-}
-
-export async function getLlmPendingCount(month: string): Promise<{ pending_count: number }> {
-  return api.get<{ pending_count: number }>("/transactions/llm-categorize-pending/count", {
-    month,
-  })
-}
-
-export async function llmCategorizePending(
-  month: string,
-  limit = 300,
-): Promise<AutoCategorizeSummary> {
-  return api.post<AutoCategorizeSummary>(
-    "/transactions/llm-categorize-pending",
-    undefined,
-    { month, limit },
   )
 }

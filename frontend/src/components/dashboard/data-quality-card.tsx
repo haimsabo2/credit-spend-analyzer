@@ -141,7 +141,7 @@ export function DataQualityCard() {
             </div>
             {data.needs_review_count > 0 && (
               <Link
-                to="/review"
+                to="/transactions?needs_review=1"
                 className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 {t("dataQuality.reviewLink")}

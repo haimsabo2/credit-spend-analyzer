@@ -60,6 +60,6 @@ def transaction_pattern_in_spend_group(session: Session, description: str | None
 
 
 def clear_needs_review_if_spend_group_member(session: Session, txn: Transaction) -> None:
-    """If description matches a spend group, do not flag for needs-review lists."""
+    """If description matches a spend group, do not flag for uncategorized transaction lists."""
     if transaction_pattern_in_spend_group(session, txn.description):
         txn.needs_review = False

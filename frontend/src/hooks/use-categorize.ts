@@ -13,7 +13,6 @@ export function useCategorize() {
       api.post<CategorizeResponse>(`/api/transactions/${txnId}/categorize`, body),
     onSuccess(data) {
       qc.invalidateQueries({ queryKey: ["transactions"] })
-      qc.invalidateQueries({ queryKey: ["needs-review"] })
       qc.invalidateQueries({ queryKey: ["merchant-groups"] })
       qc.invalidateQueries({ queryKey: ["subcategories"] })
       qc.invalidateQueries({ queryKey: ["summary"] })

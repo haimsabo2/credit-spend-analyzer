@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
-import { LayoutDashboard, Upload, CalendarDays, List, AlertCircle, CreditCard, Trash2, Loader2, Tags, LayoutList, Wallet, Download, Settings2, Repeat } from "lucide-react"
+import { LayoutDashboard, Upload, CalendarDays, List, CreditCard, Trash2, Loader2, Tags, LayoutList, Wallet, Download, Settings2, Repeat } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { api, getApiErrorToastDescription } from "@/lib/api-client"
@@ -24,7 +24,6 @@ const links = [
   { to: "/upload", labelKey: "nav.upload" as const, icon: Upload },
   { to: "/months", labelKey: "nav.months" as const, icon: CalendarDays },
   { to: "/transactions", labelKey: "nav.transactions" as const, icon: List },
-  { to: "/review", labelKey: "nav.needsReview" as const, icon: AlertCircle },
   { to: "/merchant-spend-groups", labelKey: "nav.merchantSpendGroups" as const, icon: Tags },
   { to: "/categories/merchants", labelKey: "nav.categoryMerchants" as const, icon: LayoutList },
   { to: "/budgets", labelKey: "nav.budgets" as const, icon: Wallet },

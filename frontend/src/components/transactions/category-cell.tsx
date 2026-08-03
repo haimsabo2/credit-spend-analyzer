@@ -44,7 +44,6 @@ export function CategoryCell({ transaction }: Props) {
       uncategorizeTransaction(transaction.id, sameMerchant),
     onSuccess(data) {
       qc.invalidateQueries({ queryKey: ["transactions"] })
-      qc.invalidateQueries({ queryKey: ["needs-review"] })
       qc.invalidateQueries({ queryKey: ["merchant-groups"] })
       qc.invalidateQueries({ queryKey: ["summary"] })
       qc.invalidateQueries({ queryKey: ["trends"] })

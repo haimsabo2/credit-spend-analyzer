@@ -107,7 +107,6 @@ export default function MerchantSpendGroupsPage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["merchant-groups"] })
       qc.invalidateQueries({ queryKey: ["transactions"] })
-      qc.invalidateQueries({ queryKey: ["needs-review"] })
       toast.success(
         t("merchantSpendGroups.syncSuccess", {
           processed: data.pattern_keys_processed,

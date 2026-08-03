@@ -4,7 +4,6 @@
     "upload": "Upload",
     "months": "Months",
     "transactions": "Transactions",
-    "needsReview": "Needs Review",
     "merchantSpendGroups": "Spend groups",
     "categoryMerchants": "Categories & merchants",
     "budgets": "Budgets",
@@ -38,7 +37,6 @@
     "totalSpend": "Total Spend",
     "totalTransactions": "Transactions",
     "categoriesCount": "Categories",
-    "needsReviewCount": "Needs Review",
     "noDataTitle": "No data for this month",
     "noDataCtaUpload": "Upload report",
     "errorLoading": "Error loading data",
@@ -151,37 +149,11 @@
     "other": "Other"
   },
   "review": {
-    "title": "Needs Review",
-    "month": "Month",
-    "search": "Search by description...",
-    "filterAll": "All",
-    "filterLowConfidence": "Low confidence (<0.6)",
-    "date": "Date",
-    "description": "Description",
-    "amount": "Amount",
-    "category": "Category",
-    "confidence": "Confidence",
-    "reason": "Reason",
-    "actions": "Actions",
-    "save": "Save",
-    "propagateHint": "{{count}} rows here share this description. Save updates every matching transaction and sets the category for future imports.",
     "chooseCategory": "Choose category...",
-    "emptyTitle": "No transactions to review this month 🎉",
-    "successToast": "Updated successfully",
-    "errorToast": "Error saving",
     "other": "Other",
     "newCategoryName": "New category name",
     "addCategory": "Add",
-    "createCategoryError": "Error creating category",
-    "emptyValue": "—",
-    "aiSuggestTitle": "Suggest categories with AI?",
-    "aiSuggestDescription": "This sends up to {{limit}} uncategorized rows for this month to the language model. You can still edit results afterward.",
-    "aiSuggestConfirm": "Run AI",
-    "aiSuggestCancel": "Cancel",
-    "aiSuggestButton": "Suggest with AI ({{count}})",
-    "aiSuggestRunning": "Running AI…",
-    "aiSuggestSuccess": "AI suggestions applied",
-    "aiSuggestError": "AI categorization failed"
+    "createCategoryError": "Error creating category"
   },
   "transactionSource": {
     "title": "Source in Excel",
@@ -452,7 +424,7 @@
     "colTotal": "Total",
     "colCount": "Count",
     "allCategorized": "All transactions are categorized",
-    "reviewLink": "Review"
+    "reviewLink": "View uncategorized"
   },
   "cardTrends": {
     "title": "Spend by Card",

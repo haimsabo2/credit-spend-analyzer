@@ -35,7 +35,6 @@ function invalidateDataQueries(): void {
   void queryClient.invalidateQueries({ queryKey: ["uploads"] })
   void queryClient.invalidateQueries({ queryKey: ["summary"] })
   void queryClient.invalidateQueries({ queryKey: ["transactions"] })
-  void queryClient.invalidateQueries({ queryKey: ["needs-review"] })
   void queryClient.invalidateQueries({ queryKey: ["trends"] })
 }
 

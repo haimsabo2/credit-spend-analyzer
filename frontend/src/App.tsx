@@ -8,7 +8,6 @@ import DashboardPage from "@/pages/dashboard"
 import UploadPage from "@/pages/upload"
 import MonthsPage from "@/pages/months"
 import TransactionsPage from "@/pages/transactions"
-import NeedsReviewPage from "@/pages/needs-review"
 import MerchantSpendGroupsPage from "@/pages/merchant-spend-groups"
 import CategoryMerchantsPage from "@/pages/category-merchants"
 import BudgetsPage from "@/pages/budgets"
@@ -27,7 +26,6 @@ export default function App() {
             <Route path="upload" element={<UploadPage />} />
             <Route path="months" element={<MonthsPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
-            <Route path="review" element={<NeedsReviewPage />} />
             <Route path="merchant-spend-groups" element={<MerchantSpendGroupsPage />} />
             <Route path="categories/merchants" element={<CategoryMerchantsPage />} />
             <Route path="budgets" element={<BudgetsPage />} />

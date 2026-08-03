@@ -48,7 +48,6 @@ import {
 import type { CategoryMonthlyRow, SummaryResponse } from "@/api/types"
 import { ApiError } from "@/api/client"
 import { getSummary, getRangeOverview } from "@/api/insights"
-import { getNeedsReview } from "@/api/transactions"
 import { listTransactions } from "@/api/transactions"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
 import { priorMonth } from "@/utils/month"
@@ -192,12 +191,6 @@ export default function DashboardPage() {
     queryKey: ["summary", prevMonthKey ?? ""],
     queryFn: () => getSummary(prevMonthKey!),
     enabled: !!prevMonthKey,
-  })
-
-  const { data: needsReview } = useQuery({
-    queryKey: ["needs-review", selectedMonth],
-    queryFn: () => getNeedsReview(selectedMonth),
-    enabled: !!selectedMonth,
   })
 
   const { data: yearTrends, isLoading: yearTrendsLoading } = useQuery({
@@ -687,7 +680,7 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <StatCard
                 title={t("dashboard.totalSpend")}
                 value={formatCurrency(effectiveSummary?.total_spend ?? 0, currency)}
@@ -695,7 +688,6 @@ export default function DashboardPage() {
               />
               <StatCard title={t("dashboard.totalTransactions")} value={totalTransactions} />
               <StatCard title={t("dashboard.categoriesCount")} value={categoriesCount} />
-              <StatCard title={t("dashboard.needsReviewCount")} value={needsReview?.length ?? 0} />
             </div>
           )}
 

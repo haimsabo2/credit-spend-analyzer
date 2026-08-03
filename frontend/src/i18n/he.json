@@ -4,7 +4,6 @@
     "upload": "העלאה",
     "months": "חודשים",
     "transactions": "עסקאות",
-    "needsReview": "נדרש בדיקה",
     "merchantSpendGroups": "קבוצות הוצאה",
     "categoryMerchants": "קטגוריות ובתי עסק",
     "budgets": "תקציבים",
@@ -38,7 +37,6 @@
     "totalSpend": "סה״כ הוצאות",
     "totalTransactions": "מספר עסקאות",
     "categoriesCount": "קטגוריות",
-    "needsReviewCount": "נדרש בדיקה",
     "noDataTitle": "אין נתונים לחודש זה",
     "noDataCtaUpload": "העלה דוח",
     "errorLoading": "שגיאה בטעינת הנתונים",
@@ -151,37 +149,11 @@
     "other": "אחר"
   },
   "review": {
-    "title": "נדרש בדיקה",
-    "month": "חודש",
-    "search": "חיפוש לפי תיאור...",
-    "filterAll": "הכל",
-    "filterLowConfidence": "ביטחון נמוך (<0.6)",
-    "date": "תאריך",
-    "description": "תיאור",
-    "amount": "סכום",
-    "category": "קטגוריה",
-    "confidence": "ביטחון",
-    "reason": "סיבה",
-    "actions": "פעולות",
-    "save": "שמור",
-    "propagateHint": "{{count}} שורות ברשימה עם אותו תיאור. השמירה מעדכנת את כל ההתאמות ומגדירה קטגוריה לייבוא עתידי.",
     "chooseCategory": "בחר קטגוריה...",
-    "emptyTitle": "אין עסקאות לבדיקה בחודש הזה 🎉",
-    "successToast": "עודכן בהצלחה",
-    "errorToast": "שגיאה בשמירה",
     "other": "אחר",
     "newCategoryName": "שם קטגוריה חדשה",
     "addCategory": "הוסף",
-    "createCategoryError": "שגיאה ביצירת קטגוריה",
-    "emptyValue": "—",
-    "aiSuggestTitle": "להציע קטגוריות עם AI?",
-    "aiSuggestDescription": "נשלחות עד {{limit}} עסקאות בלי קטגוריה בחודש הזה למודל השפה. אפשר לערוך אחר כך.",
-    "aiSuggestConfirm": "הרץ AI",
-    "aiSuggestCancel": "ביטול",
-    "aiSuggestButton": "הצעה עם AI ({{count}})",
-    "aiSuggestRunning": "מריץ AI…",
-    "aiSuggestSuccess": "ההצעות מהמודל הוחלו",
-    "aiSuggestError": "סיווג AI נכשל"
+    "createCategoryError": "שגיאה ביצירת קטגוריה"
   },
   "transactionSource": {
     "title": "מקור ב־Excel",
@@ -452,7 +424,7 @@
     "colTotal": "סכום",
     "colCount": "מספר",
     "allCategorized": "כל העסקאות מסווגות",
-    "reviewLink": "לבדיקה"
+    "reviewLink": "לעסקאות ללא קטגוריה"
   },
   "cardTrends": {
     "title": "הוצאות לפי כרטיס",

@@ -50,7 +50,6 @@ export function usePatchMerchantGroupSubcategory() {
     onSuccess() {
       qc.invalidateQueries({ queryKey: ["merchant-groups"] })
       qc.invalidateQueries({ queryKey: ["transactions"] })
-      qc.invalidateQueries({ queryKey: ["needs-review"] })
       toast.success(t("subcategories.updateSuccess"))
     },
     onError(err) {

@@ -18,7 +18,6 @@ export function usePatchTransactionSubcategory() {
     }) => patchTransactionSubcategory(transactionId, subcategoryId),
     onSuccess() {
       qc.invalidateQueries({ queryKey: ["transactions"] })
-      qc.invalidateQueries({ queryKey: ["needs-review"] })
       qc.invalidateQueries({ queryKey: ["merchant-groups"] })
       toast.success(t("subcategories.updateSuccess"))
     },

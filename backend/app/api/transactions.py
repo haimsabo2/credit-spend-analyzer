@@ -19,7 +19,6 @@ from ..schemas import (
     CategorizeQueueResponse,
     CategorizeRequest,
     CategorizeResponse,
-    LlmPendingCountResponse,
     MerchantGroupActionBody,
     MerchantGroupActionResponse,
     MerchantGroupListResponse,
@@ -33,7 +32,6 @@ from ..schemas import (
 from ..services.batch_categorize import (
     REASON_PENDING_MANUAL_OR_AI,
     batch_categorize_transactions,
-    llm_categorize_transactions,
 )
 from ..services.merchant_subcategory import (
     apply_approved_subcategory_after_category,
@@ -271,20 +269,6 @@ def pending_categorization_count(session: Session, month: str) -> int:
         .where(
             Upload.month == month,
             _pending_auto_categorize_clause(),
-            transaction_not_in_merchant_spend_group_clause(),
-        )
-    )
-    return int(session.exec(stmt).one())
-
-
-def llm_pending_uncategorized_count(session: Session, month: str) -> int:
-    stmt = (
-        select(func.count())
-        .select_from(Transaction)
-        .join(Upload, Transaction.upload_id == Upload.id)
-        .where(
-            Upload.month == month,
-            Transaction.category_id == None,  # noqa: E711
             transaction_not_in_merchant_spend_group_clause(),
         )
     )
@@ -853,7 +837,6 @@ def auto_categorize(
     If force=true: all transactions; overwrites category_id, confidence, reason_he, needs_review.
 
     Tries DB rules and keyword dictionary; LLM runs only if CSA_AUTO_CATEGORIZE_USE_LLM is true.
-    Otherwise use POST /transactions/llm-categorize-pending for opt-in AI.
     """
     if force:
         stmt = select(Transaction).join(Upload, Transaction.upload_id == Upload.id).where(
@@ -875,42 +858,6 @@ def categorize_queue(session: SessionDep, month: str = Query(..., description="S
     _validate_month_ym(month)
     n = pending_categorization_count(session, month)
     return CategorizeQueueResponse(pending_count=n)
-
-
-@router.get(
-    "/llm-categorize-pending/count",
-    response_model=LlmPendingCountResponse,
-)
-def llm_categorize_pending_count(
-    session: SessionDep,
-    month: str = Query(..., description="Statement month YYYY-MM"),
-):
-    """Count uncategorized rows in the month (category_id IS NULL)."""
-    _validate_month_ym(month)
-    return LlmPendingCountResponse(pending_count=llm_pending_uncategorized_count(session, month))
-
-
-@router.post("/llm-categorize-pending", response_model=AutoCategorizeSummary)
-def llm_categorize_pending(
-    session: SessionDep,
-    month: str = Query(..., description="Statement month YYYY-MM"),
-    limit: int = Query(300, ge=1, le=500, description="Max rows to send to the model"),
-):
-    """Opt-in AI categorization for uncategorized rows only (rules/dictionary are not re-run)."""
-    _validate_month_ym(month)
-    stmt = (
-        select(Transaction)
-        .join(Upload, Transaction.upload_id == Upload.id)
-        .where(
-            Upload.month == month,
-            Transaction.category_id == None,  # noqa: E711
-            transaction_not_in_merchant_spend_group_clause(),
-        )
-        .order_by(Transaction.id.asc())
-        .limit(limit)
-    )
-    txns = list(session.exec(stmt).all())
-    return llm_categorize_transactions(session, txns)
 
 
 @router.post("/auto-categorize-chunk", response_model=AutoCategorizeChunkResponse)
@@ -956,29 +903,6 @@ def auto_categorize_chunk(
         categorize_stage=stage,
         categorize_stage_detail=detail,
     )
-
-
-@router.get("/needs-review", response_model=list[TransactionRead])
-def get_needs_review(
-    session: SessionDep,
-    month: str = Query(..., description="Statement month YYYY-MM"),
-    limit: int = Query(200, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-):
-    """Return transactions flagged for manual review in a given month."""
-    stmt = (
-        select(Transaction)
-        .join(Upload, Transaction.upload_id == Upload.id)
-        .where(
-            Upload.month == month,
-            Transaction.needs_review == True,  # noqa: E712
-            transaction_not_in_merchant_spend_group_clause(),
-        )
-        .order_by(Transaction.id.desc())
-        .offset(offset)
-        .limit(limit)
-    )
-    return transactions_to_reads(session, session.exec(stmt).all())
 
 
 @router.get("/export")

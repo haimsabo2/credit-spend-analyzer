@@ -22,7 +22,6 @@ export function useUpdateSpendPattern() {
     },
     onSuccess() {
       qc.invalidateQueries({ queryKey: ["transactions"] })
-      qc.invalidateQueries({ queryKey: ["needs-review"] })
       toast.success(t("transactionsTable.patternUpdated"))
     },
     onError() {

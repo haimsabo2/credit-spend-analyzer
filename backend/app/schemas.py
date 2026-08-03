@@ -60,12 +60,6 @@ class CategorizeQueueResponse(SQLModel):
     pending_count: int
 
 
-class LlmPendingCountResponse(SQLModel):
-    """Rows in the month with no category (candidates for opt-in AI categorization)."""
-
-    pending_count: int
-
-
 class AutoCategorizeChunkResponse(SQLModel):
     chunk: AutoCategorizeSummary
     pending_remaining: int

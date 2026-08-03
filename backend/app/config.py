@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     llm_base_url: Optional[str] = None
     # Representatives per LLM request (dedupe collapses identical merchant lines first).
     categorize_llm_batch_size: int = 32
-    # When false, auto-categorize uses rules + dictionary only; use llm-categorize-pending for AI.
+    # When false, auto-categorize uses rules + dictionary only (no LLM).
     auto_categorize_use_llm: bool = False
     # Directory for persisted XLS uploads (empty = backend/data/upload_files).
     upload_storage_dir: str = ""
