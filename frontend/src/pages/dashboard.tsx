@@ -25,6 +25,8 @@ import { CardSpendSection } from "@/components/dashboard/card-spend-section"
 import { CategoryYearCarousel } from "@/components/dashboard/category-year-carousel"
 import { CategoryYearDrilldownDialog } from "@/components/dashboard/category-year-drilldown-dialog"
 import { CategoryMonthTransactionsDialog } from "@/components/dashboard/category-month-transactions-dialog"
+import { VsMovingAverageBadge } from "@/components/dashboard/vs-moving-average-badge"
+import { CategoryMovingAverageLabel } from "@/components/dashboard/category-moving-average-label"
 import { MonthPieSubcategoryDrilldown } from "@/components/dashboard/month-pie-subcategory-drilldown"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { ChartCard } from "@/components/dashboard/chart-card"
@@ -50,6 +52,7 @@ import { ApiError } from "@/api/client"
 import { getSummary, getRangeOverview } from "@/api/insights"
 import { listTransactions } from "@/api/transactions"
 import { formatCurrency, formatMonthShort } from "@/utils/format"
+import { countMonthsWithData } from "@/utils/moving-average"
 import { priorMonth } from "@/utils/month"
 import {
   DEFAULT_FISCAL_START_YEAR,
@@ -141,6 +144,17 @@ function canOpenCategoryMonthCell(row: CategoryMonthlyRow, amount: number): bool
   return row.category_id != null || isUncategorizedCategoryRow(row)
 }
 
+function findCategoryMonthlyRow(
+  rows: CategoryMonthlyRow[],
+  categoryId: number | null,
+  categoryName: string,
+): CategoryMonthlyRow | undefined {
+  if (categoryId != null) {
+    return rows.find((r) => r.category_id === categoryId)
+  }
+  return rows.find((r) => r.category_name === categoryName)
+}
+
 export default function DashboardPage() {
   const { t } = useTranslation()
   const fiscalOptions = useMemo(() => fiscalYearSelectOptions(), [])
@@ -201,6 +215,11 @@ export default function DashboardPage() {
   const monthsInYear = fiscalRange.months
 
   const categoryMonthlyRows = yearTrends?.category_monthly
+
+  const monthsWithDataCount = useMemo(
+    () => countMonthsWithData(yearTrends?.total_spend_series ?? []),
+    [yearTrends?.total_spend_series],
+  )
 
   const [categoryDrilldownRow, setCategoryDrilldownRow] = useState<CategoryMonthlyRow | null>(null)
   const [categoryMonthCell, setCategoryMonthCell] = useState<{
@@ -587,16 +606,26 @@ export default function DashboardPage() {
                   currency={currency}
                 />
                 <div className="overflow-x-auto rounded-md border">
+                  <p className="text-muted-foreground border-b bg-muted/30 px-3 py-2 text-xs">
+                    {t("dashboard.movingAvgHint")}
+                  </p>
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead className="bg-background sticky start-0 z-10 min-w-[9rem] shadow-[2px_0_4px_-2px_hsl(var(--border))]">
-                          {t("dashboard.categoryYearTableCategory")}
+                          <div>{t("dashboard.categoryYearTableCategory")}</div>
+                          {monthsWithDataCount > 0 ? (
+                            <div className="text-muted-foreground mt-0.5 text-[10px] font-normal">
+                              {t("dashboard.movingAvgCategoryColumnHint", {
+                                count: monthsWithDataCount,
+                              })}
+                            </div>
+                          ) : null}
                         </TableHead>
                         {(yearTrends?.months ?? []).map((ym) => (
                           <TableHead
                             key={ym}
-                            className="min-w-[4.5rem] text-end text-xs font-normal whitespace-nowrap"
+                            className={`min-w-[4.5rem] text-end text-xs font-normal whitespace-nowrap ${ym === selectedMonth ? "bg-primary/5" : ""}`}
                           >
                             {formatMonthShort(ym)}
                           </TableHead>
@@ -610,7 +639,14 @@ export default function DashboardPage() {
                       {(categoryMonthlyRows ?? []).map((row) => (
                         <TableRow key={categoryRowSelectValue(row)}>
                           <TableCell className="bg-background sticky start-0 z-10 font-medium shadow-[2px_0_4px_-2px_hsl(var(--border))]">
-                            {row.category_name}
+                            <span className="block leading-snug">{row.category_name}</span>
+                            {monthsWithDataCount > 0 ? (
+                              <CategoryMovingAverageLabel
+                                yearTotal={row.year_total}
+                                monthsWithData={monthsWithDataCount}
+                                currency={currency}
+                              />
+                            ) : null}
                           </TableCell>
                           {row.amounts.map((amt, i) => {
                             const ym = yearTrends?.months[i] ?? ""
@@ -618,7 +654,7 @@ export default function DashboardPage() {
                             return (
                               <TableCell
                                 key={ym || i}
-                                className={`text-end tabular-nums text-sm ${clickable ? "p-0" : ""}`}
+                                className={`text-end tabular-nums text-sm ${ym === selectedMonth ? "bg-primary/5" : ""} ${clickable ? "p-0" : ""}`}
                               >
                                 {clickable ? (
                                   <button
@@ -628,11 +664,27 @@ export default function DashboardPage() {
                                       setCategoryMonthCell({ row, month: ym, amount: amt })
                                     }
                                   >
-                                    {formatCurrency(amt, currency)}
+                                    <span className="block tabular-nums">{formatCurrency(amt, currency)}</span>
+                                    <VsMovingAverageBadge
+                                      amount={amt}
+                                      yearTotal={row.year_total}
+                                      monthsWithData={monthsWithDataCount}
+                                    />
                                   </button>
                                 ) : (
                                   <span className="block px-3 py-2">
-                                    {amt > 0 ? formatCurrency(amt, currency) : "—"}
+                                    {amt > 0 ? (
+                                      <>
+                                        <span className="block tabular-nums">{formatCurrency(amt, currency)}</span>
+                                        <VsMovingAverageBadge
+                                          amount={amt}
+                                          yearTotal={row.year_total}
+                                          monthsWithData={monthsWithDataCount}
+                                        />
+                                      </>
+                                    ) : (
+                                      "—"
+                                    )}
                                   </span>
                                 )}
                               </TableCell>
@@ -647,7 +699,7 @@ export default function DashboardPage() {
                   </Table>
                 </div>
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  {t("dashboard.categoryYearTableClickHint")}
+                  {t("dashboard.categoryYearTableClickHint")} {t("dashboard.movingAvgLegend")}
                 </p>
               </div>
             )}
@@ -656,7 +708,7 @@ export default function DashboardPage() {
           <div id="month-detail" className="scroll-mt-6 space-y-4 border-t pt-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-lg font-semibold tracking-tight">{t("dashboard.monthDetailHeading")}</h2>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-muted-foreground">{t("dashboard.month")}:</span>
                 <Select value={selectedMonth} onValueChange={handlePickMonth}>
                   <SelectTrigger className="w-[160px]">
@@ -752,6 +804,11 @@ export default function DashboardPage() {
                   >
                     {pieData.map((entry, i) => {
                       const pct = pieTotal > 0 ? (entry.value / pieTotal) * 100 : 0
+                      const monthlyRow = findCategoryMonthlyRow(
+                        categoryMonthlyRows ?? [],
+                        entry.categoryId,
+                        entry.name,
+                      )
                       return (
                         <li key={`${entry.name}-${i}`} className="flex gap-2.5">
                           <span
@@ -773,11 +830,28 @@ export default function DashboardPage() {
                                   })
                                 }}
                               >
-                                {entry.name}
+                                <span className="block">{entry.name}</span>
+                                {monthlyRow && monthsWithDataCount > 0 ? (
+                                  <CategoryMovingAverageLabel
+                                    yearTotal={monthlyRow.year_total}
+                                    monthsWithData={monthsWithDataCount}
+                                    currency={currency}
+                                  />
+                                ) : null}
                               </button>
                               <span className="shrink-0 tabular-nums text-muted-foreground sm:text-end">
                                 {formatCurrency(entry.value, currency)}
                                 <span className="ms-1 text-xs">({pct.toFixed(0)}%)</span>
+                                {monthlyRow && monthsWithDataCount > 0 ? (
+                                  <span className="ms-1 inline-block align-middle">
+                                    <VsMovingAverageBadge
+                                      amount={entry.value}
+                                      yearTotal={monthlyRow.year_total}
+                                      monthsWithData={monthsWithDataCount}
+                                      className="inline"
+                                    />
+                                  </span>
+                                ) : null}
                               </span>
                             </div>
                           </div>
