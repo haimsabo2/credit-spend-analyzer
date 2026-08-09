@@ -168,3 +168,19 @@ def test_merchant_groups_uncategorized_only(seeded_client: TestClient):
     assert r.status_code == 200
     for item in r.json()["items"]:
         assert item["category_id"] is None
+
+
+def test_merchant_group_sources(seeded_client: TestClient):
+    data = _first_group(seeded_client, approved=False)
+    if not data["items"]:
+        pytest.skip("No merchant groups in fixture")
+    pk = data["items"][0]["pattern_key"]
+    r = seeded_client.get(
+        "/api/transactions/merchant-groups/sources",
+        params={"pattern_key": pk, "limit": 50},
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert isinstance(rows, list)
+    assert len(rows) >= 1
+    assert rows[0]["description"]

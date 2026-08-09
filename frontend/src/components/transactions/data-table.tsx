@@ -20,7 +20,24 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight, Inbox } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { TransactionRead } from "@/types/api"
+import type { TransactionRead, MerchantGroupRow } from "@/types/api"
+import { getTransactionRowClassName } from "./transaction-row-styles"
+
+function rowStyleFromOriginal<T>(original: T, anomalyNames?: Set<string>, description?: string) {
+  const desc =
+    description ??
+    String(
+      (original as { display_description?: string }).display_description ??
+        (original as { description?: string }).description ??
+        "",
+    )
+  const isAnomaly = anomalyNames?.has(desc) ?? false
+  const mg = original as MerchantGroupRow
+  const txn = original as unknown as TransactionRead
+  const categoryConflict = mg.category_conflict ?? txn.merchant_category_conflict ?? false
+  const spendPattern = txn.spend_pattern ?? "unknown"
+  return getTransactionRowClassName({ isAnomaly, categoryConflict, spendPattern })
+}
 
 interface DataTableProps<T> {
   columns: ColumnDef<T, unknown>[]
@@ -127,27 +144,10 @@ export function DataTable<T>({
             ) : (
               table.getRowModel().rows.map((row) => {
                 const desc = String(row.original[descriptionAccessor] ?? "")
-                const isAnomaly = anomalyNames?.has(desc)
-                const txn = row.original as unknown as TransactionRead
-                const pattern = txn.spend_pattern ?? "unknown"
-                const catConflict = txn.merchant_category_conflict
                 return (
                   <TableRow
                     key={row.id}
-                    className={cn(
-                      isAnomaly && "bg-destructive/5 border-s-2 border-s-destructive",
-                      !isAnomaly &&
-                        catConflict &&
-                        "border-s-2 border-s-amber-500/70 bg-amber-500/[0.06] dark:bg-amber-500/10",
-                      !isAnomaly &&
-                        !catConflict &&
-                        pattern === "recurring" &&
-                        "bg-sky-500/[0.07] dark:bg-sky-500/10",
-                      !isAnomaly &&
-                        !catConflict &&
-                        pattern === "one_time" &&
-                        "bg-violet-500/[0.08] dark:bg-violet-500/12",
-                    )}
+                    className={rowStyleFromOriginal(row.original, anomalyNames, desc)}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id} style={{ width: cell.column.getSize() }}>

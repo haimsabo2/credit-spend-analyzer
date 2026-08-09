@@ -513,6 +513,23 @@ WHERE ({main_where})
     return MerchantGroupListResponse(items=items, total=total)
 
 
+@router.get("/merchant-groups/sources", response_model=list[TransactionRead])
+def merchant_group_sources(
+    session: SessionDep,
+    pattern_key: str = Query(..., min_length=1, description="Normalized merchant pattern key"),
+    limit: int = Query(200, ge=1, le=500),
+):
+    """All transactions for one merchant key, newest first (for Excel source lookup)."""
+    pk = normalize_merchant_pattern_key(pattern_key)
+    stmt = (
+        select(Transaction)
+        .where(func.lower(func.trim(Transaction.description)) == pk)
+        .order_by(Transaction.posted_at.desc(), Transaction.id.desc())
+        .limit(limit)
+    )
+    return transactions_to_reads(session, session.exec(stmt).all())
+
+
 @router.post("/merchant-groups/approve", response_model=MerchantGroupActionResponse)
 def approve_merchant_group(
     session: SessionDep,

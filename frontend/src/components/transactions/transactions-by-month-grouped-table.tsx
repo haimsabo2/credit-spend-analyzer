@@ -24,6 +24,10 @@ import { formatCurrency } from "@/lib/format"
 import { CategoryCell } from "./category-cell"
 import { MerchantGroupSubcategoryCell } from "./merchant-group-subcategory-cell"
 import { groupTransactionsByMerchantKey, type MerchantTxnGroup } from "@/utils/merchant-key"
+import {
+  getMerchantGroupHeaderClassName,
+  getTransactionRowClassName,
+} from "./transaction-row-styles"
 
 function toMerchantGroupRow(g: MerchantTxnGroup): MerchantGroupRow {
   const r = g.representative
@@ -56,24 +60,13 @@ function TransactionDataRow({
   const transaction = row.original
   const desc = transaction.description
   const isAnomaly = anomalyNames?.has(desc)
-  const pattern = transaction.spend_pattern ?? "unknown"
-  const catConflict = transaction.merchant_category_conflict
   return (
     <TableRow
-      className={cn(
-        isAnomaly && "bg-destructive/5 border-s-2 border-s-destructive",
-        !isAnomaly &&
-          catConflict &&
-          "border-s-2 border-s-amber-500/70 bg-amber-500/[0.06] dark:bg-amber-500/10",
-        !isAnomaly &&
-          !catConflict &&
-          pattern === "recurring" &&
-          "bg-sky-500/[0.07] dark:bg-sky-500/10",
-        !isAnomaly &&
-          !catConflict &&
-          pattern === "one_time" &&
-          "bg-violet-500/[0.08] dark:bg-violet-500/12",
-      )}
+      className={getTransactionRowClassName({
+        isAnomaly,
+        categoryConflict: transaction.merchant_category_conflict,
+        spendPattern: transaction.spend_pattern,
+      })}
     >
       {row.getVisibleCells().map((cell) => (
         <TableCell key={cell.id} style={{ width: cell.column.getSize() }}>
@@ -209,11 +202,7 @@ export function TransactionsByMonthGroupedTable({
                 const headerRow = (
                   <TableRow
                     key={`g-${g.patternKey}`}
-                    className={cn(
-                      "bg-muted/40 hover:bg-muted/50",
-                      mg.category_conflict &&
-                        "border-s-2 border-s-amber-500/60 bg-amber-500/[0.08] dark:bg-amber-950/20",
-                    )}
+                    className={getMerchantGroupHeaderClassName(Boolean(mg.category_conflict))}
                   >
                     {columns.map((col) => (
                       <TableCell key={colKey(col)} style={{ width: col.size as number }}>

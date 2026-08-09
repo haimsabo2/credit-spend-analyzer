@@ -66,6 +66,16 @@ export async function setMerchantGroupSubcategory(
   return api.post<{ pattern_key: string }>("/transactions/merchant-groups/subcategory", body)
 }
 
+export async function listMerchantGroupSources(
+  patternKey: string,
+  limit = 200,
+): Promise<TransactionRead[]> {
+  return api.get<TransactionRead[]>("/transactions/merchant-groups/sources", {
+    pattern_key: patternKey,
+    limit,
+  })
+}
+
 export async function patchTransactionSubcategory(
   transactionId: number,
   subcategoryId: number | null,

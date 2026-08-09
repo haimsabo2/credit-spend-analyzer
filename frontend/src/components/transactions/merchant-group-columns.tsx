@@ -4,7 +4,7 @@ import type { MerchantGroupRow, TransactionRead } from "@/types/api"
 import { CategoryCell } from "./category-cell"
 import { MerchantGroupSubcategoryCell } from "./merchant-group-subcategory-cell"
 import { formatCurrency } from "@/lib/format"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, FileSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
@@ -35,10 +35,11 @@ export function getMerchantGroupColumns(
     variant: "pending" | "approved"
     onApprove: (row: MerchantGroupRow) => void
     onUnapprove: (row: MerchantGroupRow) => void
+    onOpenSources?: (row: MerchantGroupRow) => void
     actionDisabled: boolean
   },
 ): ColumnDef<MerchantGroupRow>[] {
-  const { variant, onApprove, onUnapprove, actionDisabled } = options
+  const { variant, onApprove, onUnapprove, onOpenSources, actionDisabled } = options
   const cols: ColumnDef<MerchantGroupRow>[] = [
     {
       accessorKey: "display_description",
@@ -119,9 +120,30 @@ export function getMerchantGroupColumns(
       size: 100,
       enableSorting: false,
     },
-    {
-      id: "action",
-      header: "",
+  ]
+  if (onOpenSources) {
+    cols.push({
+      id: "source",
+      header: t("transactionSource.colShort"),
+      cell: ({ row }) => (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          onClick={() => onOpenSources(row.original)}
+          title={t("merchantGroups.openSources")}
+        >
+          <FileSearch className="h-4 w-4" />
+        </Button>
+      ),
+      size: 44,
+      enableSorting: false,
+    })
+  }
+  cols.push({
+    id: "action",
+    header: "",
       cell: ({ row }) =>
         variant === "pending" ? (
           <Button
@@ -148,7 +170,6 @@ export function getMerchantGroupColumns(
         ),
       size: 120,
       enableSorting: false,
-    },
-  ]
+    })
   return cols
 }

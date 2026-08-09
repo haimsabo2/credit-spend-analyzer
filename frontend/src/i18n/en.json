@@ -189,6 +189,14 @@
     "unknown": "Unknown",
     "userLockedTitle": "You set this; auto-categorize will not change it",
     "legend": "Row tint: blue = recurring monthly spend; purple = one-time (e.g. abroad). Amber border = same merchant text but different categories. Change anytime from the list.",
+    "legendTitle": "Row colors",
+    "legendRecurring": "Recurring spend (blue)",
+    "legendOneTime": "One-time spend (purple)",
+    "legendCategoryConflict": "Category conflict (amber border)",
+    "legendAnomaly": "Unusual merchant (red border)",
+    "legendNeedsReview": "Needs categorization",
+    "legendCategorized": "Categorized",
+    "legendGroupHeader": "Grouped merchant row (month view)",
     "categoryConflictTitle": "This merchant line appears under more than one category (or mixed with uncategorized). Pick one category to align all rows.",
     "categoryConflictBadge": "Category mismatch",
     "categoryConflictBanner": "{{count}} transaction(s) in this view: same merchant line, different categories. Update the category on one row to propagate.",
@@ -270,7 +278,12 @@
     "colOccurrences": "Count",
     "colTotal": "Total",
     "approve": "Approve",
-    "unapprove": "Unapprove"
+    "unapprove": "Unapprove",
+    "openSources": "Show Excel sources",
+    "sourcesTitle": "Excel sources",
+    "sourcesDescription": "{{count}} source row(s) for «{{name}}». Pick one to open file details.",
+    "sourcesEmpty": "No Excel source is stored for this merchant.",
+    "sourcesLoadError": "Could not load sources"
   },
   "subcategories": {
     "manageButton": "Subcategories",

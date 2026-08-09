@@ -189,6 +189,14 @@
     "unknown": "לא ידוע",
     "userLockedTitle": "סימנת ידנית — סיווג אוטומטי לא ישנה את זה",
     "legend": "רקע שורה: כחול = הוצאה חוזרת; סגול = חד־פעמית (למשל חו״ל). מסגרת ענבר = אותה שורת בית עסק אך קטגוריות שונות. אפשר לתקן בכל עת מהרשימה.",
+    "legendTitle": "מקרא צבעי שורות",
+    "legendRecurring": "הוצאה חוזרת (כחול)",
+    "legendOneTime": "הוצאה חד־פעמית (סגול)",
+    "legendCategoryConflict": "קטגוריה לא עקבית (מסגרת ענבר)",
+    "legendAnomaly": "בית עסק חריג (מסגרת אדומה)",
+    "legendNeedsReview": "ללא קטגוריה / נדרש סיווג",
+    "legendCategorized": "מסווג",
+    "legendGroupHeader": "קבוצת עסקאות (תצוגה לפי חודש)",
     "categoryConflictTitle": "אותה שורת בית עסק מופיעה תחת יותר מקטגוריה אחת (או מעורבב עם לא מסווג). בחרו קטגוריה אחת כדי ליישר את כל השורות.",
     "categoryConflictBadge": "קטגוריה לא עקבית",
     "categoryConflictBanner": "{{count}} עסקאות בתצוגה זו: אותה שורת בית עסק, קטגוריות שונות. עדכון קטגוריה בשורה אחת יופץ לכל השורות התואמות.",
@@ -270,7 +278,12 @@
     "colOccurrences": "מס׳ הופעות",
     "colTotal": "סכום כולל",
     "approve": "אשר",
-    "unapprove": "בטל אישור"
+    "unapprove": "בטל אישור",
+    "openSources": "הצג מקורות Excel",
+    "sourcesTitle": "מקורות Excel",
+    "sourcesDescription": "{{count}} שורות מקור עבור «{{name}}». בחרו שורה לפרטי הקובץ.",
+    "sourcesEmpty": "לא נשמר מקור Excel לבית עסק זה.",
+    "sourcesLoadError": "לא ניתן לטעון מקורות"
   },
   "subcategories": {
     "manageButton": "תת־קטגוריות",

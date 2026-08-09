@@ -19,9 +19,12 @@ import { TransactionSourceDialog } from "@/components/transactions/transaction-s
 import { getMerchantGroupColumns } from "@/components/transactions/merchant-group-columns"
 import type { TransactionQueryParams } from "@/types/api"
 import type { MerchantGroupRow } from "@/types/api"
-import { approveMerchantGroup, unapproveMerchantGroup } from "@/api/transactions"
+import { approveMerchantGroup, listMerchantGroupSources, unapproveMerchantGroup } from "@/api/transactions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { TransactionRowLegend } from "@/components/transactions/transaction-row-legend"
+import { MerchantGroupSourcesDialog } from "@/components/transactions/merchant-group-sources-dialog"
+import { toast } from "sonner"
 
 const PAGE_SIZE = 50
 const MONTH_GROUPED_LIMIT = 500
@@ -146,15 +149,52 @@ export default function TransactionsPage() {
 
   const actionBusy = approveMut.isPending || unapproveMut.isPending
 
+  const [sourceTxn, setSourceTxn] = useState<TransactionRead | null>(null)
+  const [sourceOpen, setSourceOpen] = useState(false)
+  const [sourcesPickerOpen, setSourcesPickerOpen] = useState(false)
+  const [sourcesPickerRow, setSourcesPickerRow] = useState<MerchantGroupRow | null>(null)
+  const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [sourcesList, setSourcesList] = useState<TransactionRead[]>([])
+
+  const openMerchantSources = useCallback(
+    async (row: MerchantGroupRow) => {
+      setSourcesLoading(true)
+      setSourcesPickerRow(row)
+      try {
+        const txns = await listMerchantGroupSources(row.pattern_key)
+        const withSource = txns.filter(
+          (txn) => txn.source_row_1based != null || txn.source_trace_upload_id != null,
+        )
+        if (withSource.length === 0) {
+          toast.message(t("merchantGroups.sourcesEmpty"))
+          return
+        }
+        if (withSource.length === 1) {
+          setSourceTxn(withSource[0])
+          setSourceOpen(true)
+          return
+        }
+        setSourcesList(withSource)
+        setSourcesPickerOpen(true)
+      } catch {
+        toast.error(t("merchantGroups.sourcesLoadError"))
+      } finally {
+        setSourcesLoading(false)
+      }
+    },
+    [t],
+  )
+
   const pendingCols = useMemo(
     () =>
       getMerchantGroupColumns(t, {
         variant: "pending",
         onApprove: (row) => approveMut.mutate(row),
         onUnapprove: () => {},
-        actionDisabled: actionBusy,
+        onOpenSources: openMerchantSources,
+        actionDisabled: actionBusy || sourcesLoading,
       }),
-    [t, approveMut.mutate, actionBusy],
+    [t, approveMut.mutate, actionBusy, openMerchantSources, sourcesLoading],
   )
 
   const approvedCols = useMemo(
@@ -163,13 +203,11 @@ export default function TransactionsPage() {
         variant: "approved",
         onApprove: () => {},
         onUnapprove: (row) => unapproveMut.mutate(row),
-        actionDisabled: actionBusy,
+        onOpenSources: openMerchantSources,
+        actionDisabled: actionBusy || sourcesLoading,
       }),
-    [t, unapproveMut.mutate, actionBusy],
+    [t, unapproveMut.mutate, actionBusy, openMerchantSources, sourcesLoading],
   )
-
-  const [sourceTxn, setSourceTxn] = useState<TransactionRead | null>(null)
-  const [sourceOpen, setSourceOpen] = useState(false)
 
   const columns = useMemo(
     () =>
@@ -238,6 +276,18 @@ export default function TransactionsPage() {
         onOpenChange={setSourceOpen}
         transaction={sourceTxn}
       />
+      <MerchantGroupSourcesDialog
+        open={sourcesPickerOpen}
+        onOpenChange={setSourcesPickerOpen}
+        merchantLabel={sourcesPickerRow?.display_description ?? ""}
+        sources={sourcesList}
+        isLoading={sourcesLoading}
+        onSelect={(txn) => {
+          setSourcesPickerOpen(false)
+          setSourceTxn(txn)
+          setSourceOpen(true)
+        }}
+      />
       <h1 className="text-2xl font-semibold tracking-tight">{t("transactionsTable.title")}</h1>
 
       <div className="inline-flex rounded-md border p-0.5 bg-muted/40">
@@ -294,9 +344,7 @@ export default function TransactionsPage() {
             </p>
           ) : null}
 
-          <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
-            {t("transactionsTable.legend")}
-          </p>
+          <TransactionRowLegend showGroupHeader />
           {monthCategoryConflictCount > 0 ? (
             <p className="flex max-w-3xl items-start gap-2 text-xs text-amber-800 dark:text-amber-400">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -318,6 +366,7 @@ export default function TransactionsPage() {
         </>
       ) : (
         <>
+          <TransactionRowLegend />
           <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
             {t("merchantGroups.hint")}
           </p>
