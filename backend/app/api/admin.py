@@ -13,11 +13,13 @@ router = APIRouter()
 
 @router.delete("/reset")
 def reset_all_data(session: SessionDep):
-    """Delete all user data (transactions, budgets, rules, uploads, user categories). System categories stay."""
+    """Delete all user data (transactions, budgets, rules, uploads, bank rows, user categories). System categories stay."""
     session.execute(text('DELETE FROM "transaction"'))
     session.execute(text("DELETE FROM budget"))
     session.execute(text("DELETE FROM classificationrule"))
     session.execute(text("DELETE FROM upload"))
+    session.execute(text("DELETE FROM bank_transaction"))
+    session.execute(text("DELETE FROM bank_upload"))
     session.execute(delete(Category).where(Category.is_system.is_(False)))
     session.commit()
     return {"status": "ok"}

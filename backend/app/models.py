@@ -276,3 +276,85 @@ class ClassificationRule(ClassificationRuleBase, table=True):
 
     category: Category = Relationship(back_populates="rules")
 
+class BankUpload(SQLModel, table=True):
+    """Metadata for an uploaded bank checking-account statement (.xls)."""
+
+    __tablename__ = "bank_upload"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    original_filename: str
+    content_type: Optional[str] = None
+    size_bytes: int = 0
+    file_hash: str = Field(index=True)
+    account_number: str = Field(default="", index=True)
+    date_from: Optional[date] = Field(default=None)
+    date_to: Optional[date] = Field(default=None)
+    previous_max_date: Optional[date] = Field(default=None)
+    inserted_count: int = Field(default=0)
+    skipped_duplicates_count: int = Field(default=0)
+    stored_path: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class BankTransaction(SQLModel, table=True):
+    """Normalized bank checking-account ledger row with incremental dedup key."""
+
+    __tablename__ = "bank_transaction"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    bank_upload_id: int = Field(foreign_key="bank_upload.id", index=True)
+    account_number: str = Field(default="", index=True)
+    activity_date: date = Field(index=True)
+    value_date: Optional[date] = Field(default=None)
+    month: str = Field(index=True, description="Calendar month YYYY-MM of activity_date")
+    chronological_order: int = Field(
+        default=0,
+        index=True,
+        description="Deterministic oldest-to-newest order within activity_date",
+    )
+    description: str
+    reference: str = Field(default="")
+    debit: float = Field(default=0.0)
+    credit: float = Field(default=0.0)
+    balance: Optional[float] = Field(default=None)
+    row_signature: str = Field(
+        index=True,
+        unique=True,
+        description="Deterministic SHA-256 signature for non-destructive incremental uploads",
+    )
+    flow_group: str = Field(
+        default="expense_living",
+        index=True,
+        description="income_regular | income_unemployment | income_anomaly | wash_in | expense_cc | expense_living | savings | expense_anomaly | wash_out",
+    )
+    stream_key: str = Field(default="other", index=True)
+    split_base_amount: Optional[float] = Field(
+        default=None,
+        description="When a salary row includes a bonus spike, the base net salary portion",
+    )
+    transfer_tag: Optional[str] = Field(
+        default=None,
+        description="User tag for external transfers: stock | gift | reimbursement | reserve",
+    )
+    context_note: Optional[str] = Field(default=None)
+    is_user_override: bool = Field(
+        default=False,
+        description="True when user manually edited flow_group or transfer_tag",
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BankCashflowSettings(SQLModel, table=True):
+    """Persisted assumption toggles for household cashflow normalization."""
+
+    __tablename__ = "bank_cashflow_settings"
+
+    id: Optional[int] = Field(default=1, primary_key=True)
+    inc_muni_dig: bool = Field(default=True)
+    inc_bit: bool = Field(default=True)
+    inc_bituach_leumi: bool = Field(default=False)
+    inc_sav_600_as_expense: bool = Field(default=False)
+    inc_khs_as_expense: bool = Field(default=False)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+

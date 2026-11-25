@@ -27,7 +27,8 @@ import { formatMonthShort } from "@/utils/format"
 import { recentMonths } from "@/utils/month"
 import { inferStatementMonthFromFiles } from "@/utils/infer-month-from-filename"
 import { CategorizeStageLine } from "@/components/upload/categorize-stage-line"
-import { Loader2, X } from "lucide-react"
+import { BankUploadPanel } from "@/components/bank/bank-upload-panel"
+import { CreditCard, Landmark, Loader2, X } from "lucide-react"
 
 function fileKey(f: File): string {
   return `${f.name}:${f.size}`
@@ -58,6 +59,7 @@ export default function UploadPage() {
   const [replaceMonth, setReplaceMonth] = useState(false)
   const [enrichOnly, setEnrichOnly] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [uploadMode, setUploadMode] = useState<"credit" | "bank">("credit")
   const monthLockedByUserRef = useRef(false)
 
   const phase = useUploadJobStore((s) => s.phase)
@@ -148,16 +150,47 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-6">
-      <div>
+    <div className="mx-auto max-w-xl space-y-6">
+      <div className="space-y-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("upload.title")}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{t("upload.mergeHint")}</p>
-        <p className="mt-1 text-sm text-muted-foreground">{t("upload.replaceHint")}</p>
-        <p className="mt-2 text-sm text-muted-foreground">{t("upload.statementMonthHint")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{t("upload.jobParallelNote")}</p>
+        <div className="inline-flex rounded-lg border bg-muted/40 p-1">
+          <Button
+            type="button"
+            size="sm"
+            variant={uploadMode === "credit" ? "default" : "ghost"}
+            onClick={() => setUploadMode("credit")}
+            className="gap-2"
+          >
+            <CreditCard className="h-4 w-4" />
+            {t("upload.modeCreditCard", "דוח כרטיסי אשראי")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={uploadMode === "bank" ? "default" : "ghost"}
+            onClick={() => setUploadMode("bank")}
+            className="gap-2"
+          >
+            <Landmark className="h-4 w-4" />
+            {t("upload.modeBankChecking", "תדפיס חשבון בנק (עו״ש)")}
+          </Button>
+        </div>
+
+        {uploadMode === "credit" && (
+          <div>
+            <p className="mt-1 text-sm text-muted-foreground">{t("upload.mergeHint")}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t("upload.replaceHint")}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{t("upload.statementMonthHint")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("upload.jobParallelNote")}</p>
+          </div>
+        )}
       </div>
 
-      {(phase === "uploading" || phase === "categorizing" || phase === "error" || phase === "completed") && (
+      {uploadMode === "bank" ? (
+        <BankUploadPanel showGoToCashflowLink />
+      ) : (
+        <>
+          {(phase === "uploading" || phase === "categorizing" || phase === "error" || phase === "completed") && (
         <div className="space-y-3 rounded-lg border bg-card p-4">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-medium">
@@ -351,6 +384,8 @@ export default function UploadPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        </>
+      )}
     </div>
   )
 }

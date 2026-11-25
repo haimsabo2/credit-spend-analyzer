@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 import { useQueryClient } from "@tanstack/react-query"
-import { LayoutDashboard, Upload, CalendarDays, List, CreditCard, Trash2, Loader2, Tags, LayoutList, Wallet, Download, Settings2, Repeat } from "lucide-react"
+import { LayoutDashboard, Upload, CalendarDays, List, CreditCard, Trash2, Loader2, Tags, LayoutList, Wallet, Download, Settings2, Repeat, Landmark } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { api, getApiErrorToastDescription } from "@/lib/api-client"
@@ -21,6 +21,7 @@ import { toast } from "sonner"
 
 const links = [
   { to: "/", labelKey: "nav.dashboard" as const, icon: LayoutDashboard },
+  { to: "/bank-cashflow", labelKey: "nav.bankCashflow" as const, icon: Landmark },
   { to: "/upload", labelKey: "nav.upload" as const, icon: Upload },
   { to: "/months", labelKey: "nav.months" as const, icon: CalendarDays },
   { to: "/transactions", labelKey: "nav.transactions" as const, icon: List },

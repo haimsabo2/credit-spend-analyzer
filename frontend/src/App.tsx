@@ -14,6 +14,7 @@ import BudgetsPage from "@/pages/budgets"
 import ExportPage from "@/pages/export"
 import RulesPage from "@/pages/rules"
 import RecurringSpendPage from "@/pages/recurring-spend"
+import BankCashflowPage from "@/pages/bank-cashflow"
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
+            <Route path="bank-cashflow" element={<BankCashflowPage />} />
             <Route path="upload" element={<UploadPage />} />
             <Route path="months" element={<MonthsPage />} />
             <Route path="transactions" element={<TransactionsPage />} />

@@ -349,6 +349,17 @@ def _migrate_merchant_spend_group_category_link() -> None:
             conn.execute(text(sql))
 
 
+def _ensure_bank_cashflow_settings() -> None:
+    """Ensure singleton row (id=1) exists in bank_cashflow_settings."""
+    from .models import BankCashflowSettings
+
+    with Session(engine) as session:
+        row = session.get(BankCashflowSettings, 1)
+        if row is None:
+            session.add(BankCashflowSettings(id=1))
+            session.commit()
+
+
 def init_db() -> None:
     """Create database tables for all SQLModel models."""
     from . import models  # noqa: F401
@@ -365,6 +376,7 @@ def init_db() -> None:
     _migrate_transaction_subcategory_column()
     _migrate_merchant_key_user_approval_subcategory()
     _migrate_merchant_spend_group_category_link()
+    _ensure_bank_cashflow_settings()
     with Session(engine) as session:
         ensure_seed_categories(session)
         ensure_default_subcategories(session)
